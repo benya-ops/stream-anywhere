@@ -1,0 +1,75 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    :root {
+        --background: 218 45% 6%;
+        --foreground: 210 40% 96%;
+        --card: 222 40% 11%;
+        --card-foreground: 210 40% 96%;
+        --popover: 222 44% 9%;
+        --popover-foreground: 210 40% 96%;
+        --primary: 199 92% 60%;
+        --primary-foreground: 222 47% 8%;
+        --secondary: 217 33% 17%;
+        --secondary-foreground: 210 40% 96%;
+        --muted: 217 33% 15%;
+        --muted-foreground: 215 20% 60%;
+        --accent: 217 33% 20%;
+        --accent-foreground: 210 40% 96%;
+        --destructive: 0 72% 51%;
+        --destructive-foreground: 210 40% 98%;
+        --border: 217 33% 18%;
+        --input: 217 33% 18%;
+        --ring: 199 92% 60%;
+        --chart-1: 187 92% 43%;
+        --chart-2: 160 84% 39%;
+        --chart-3: 239 84% 67%;
+        --chart-4: 38 92% 50%;
+        --chart-5: 0 72% 51%;
+        --radius: 0.5rem;
+    }
+}
+
+@layer base {
+    * {
+        @apply border-border;
+    }
+    body {
+        @apply bg-background text-foreground;
+        font-family: 'Inter', system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+    }
+    .font-display { font-family: 'Outfit', sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+}
+
+/* subtle grain + scanline atmosphere */
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background-image: radial-gradient(circle at 12% -10%, rgba(56,189,248,0.08), transparent 40%),
+                      radial-gradient(circle at 90% 0%, rgba(99,102,241,0.07), transparent 45%);
+}
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: hsl(217 33% 22%); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(217 33% 30%); }
+
+::selection { background: rgba(56,189,248,0.3); }
+
+.tabular { font-variant-numeric: tabular-nums; }
+
+@keyframes livepulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(16,185,129,0.6); }
+    50% { opacity: 0.55; box-shadow: 0 0 0 5px rgba(16,185,129,0); }
+}
+.live-dot { animation: livepulse 1.8s ease-in-out infinite; }

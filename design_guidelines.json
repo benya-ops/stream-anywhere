@@ -1,0 +1,139 @@
+{
+  "product_name": "Stream Anywhere",
+  "archetype": "THE PERFORMANCE PRO / MISSION CONTROL (Broadcast Engineering)",
+  "context_type": "DASHBOARD (Professional Media Server & Live Broadcast Control Panel)",
+  "theme_strategy": {
+    "default_mode": "dark",
+    "theme_toggle": true,
+    "background_base": "bg-[#090D14]",
+    "surface_cards": "bg-[#0F172A]/80 border-[#1E293B]",
+    "surface_hover": "hover:bg-[#1E293B]/60",
+    "surface_elevated": "bg-[#141E33]",
+    "border_subtle": "border-[#1E293B]",
+    "border_active": "border-[#38BDF8]/40"
+  },
+  "typography": {
+    "font_family_display": "Outfit, Plus Jakarta Sans, sans-serif",
+    "font_family_body": "Inter, system-ui, sans-serif",
+    "font_family_mono": "JetBrains Mono, Fira Code, monospace",
+    "heading_rules": {
+      "h1": "text-2xl sm:text-3xl font-bold tracking-tight text-slate-100 font-display",
+      "h2": "text-xl sm:text-2xl font-semibold tracking-tight text-slate-100 font-display",
+      "h3": "text-lg font-medium text-slate-200 font-display",
+      "h4": "text-sm font-semibold uppercase tracking-wider text-slate-400 font-mono"
+    },
+    "technical_readout_rules": "font-mono text-xs md:text-sm tracking-wide text-emerald-400 bg-slate-950/80 px-2 py-0.5 rounded border border-emerald-500/20"
+  },
+  "colors": {
+    "background": {
+      "main": "#090D14",
+      "sidebar": "#070A0F",
+      "card": "#0F172A",
+      "overlay": "#05080E/90"
+    },
+    "status_palette": {
+      "online_live": {
+        "text": "#10B981",
+        "bg": "#10B981/10",
+        "border": "#10B981/30",
+        "pulse": "bg-emerald-500 animate-pulse"
+      },
+      "degraded_warning": {
+        "text": "#F59E0B",
+        "bg": "#F59E0B/10",
+        "border": "#F59E0B/30"
+      },
+      "offline_error": {
+        "text": "#EF4444",
+        "bg": "#EF4444/10",
+        "border": "#EF4444/30"
+      },
+      "standby_idle": {
+        "text": "#64748B",
+        "bg": "#64748B/10",
+        "border": "#64748B/30"
+      }
+    },
+    "brand_accents": {
+      "cyan_signal": "#06B6D4",
+      "indigo_core": "#6366F1",
+      "sky_highlight": "#38BDF8",
+      "violet_stream": "#8B5CF6"
+    },
+    "charts": {
+      "ingest_bitrate": "#06B6D4",
+      "egress_bandwidth": "#10B981",
+      "viewer_count": "#6366F1",
+      "packet_loss": "#EF4444",
+      "cpu_load": "#F59E0B"
+    }
+  },
+  "layout_and_grids": {
+    "app_shell": {
+      "sidebar_width": "w-64 fixed left-0 top-0 h-screen bg-[#070A0F] border-r border-[#1E293B] z-40",
+      "header_height": "h-16 fixed top-0 right-0 left-64 bg-[#090D14]/90 backdrop-blur-md border-b border-[#1E293B] z-30 px-6 flex items-center justify-between",
+      "main_content": "pl-64 pt-16 min-h-screen bg-[#090D14] text-slate-200 p-6 md:p-8"
+    },
+    "grid_modes": {
+      "high_density_dashboard": "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6",
+      "stream_matrix": "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6",
+      "split_inspector": "grid grid-cols-1 lg:grid-cols-12 gap-6"
+    }
+  },
+  "component_styling": {
+    "stat_card": "bg-[#0F172A]/80 border border-[#1E293B] hover:border-[#38BDF8]/40 transition-all rounded-lg p-5 flex flex-col justify-between relative overflow-hidden group",
+    "badge": "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-mono font-medium border",
+    "data_table": "w-full text-left text-sm border-collapse rounded-lg overflow-hidden border border-[#1E293B]",
+    "table_header": "bg-[#141E33] text-slate-400 font-mono text-xs uppercase tracking-wider py-3 px-4 border-b border-[#1E293B]",
+    "table_row": "border-b border-[#1E293B]/60 hover:bg-[#1E293B]/40 transition-colors text-slate-300",
+    "live_player_card": "relative rounded-lg overflow-hidden bg-black border border-[#1E293B] group shadow-2xl",
+    "codec_chip": "px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300 font-mono text-xs"
+  },
+  "key_features_and_views": [
+    {
+      "id": "overview_monitoring",
+      "title": "Stream Monitoring & Mission Control",
+      "description": "Real-time stream health matrix, total egress/ingest bandwidth gauge, viewer sessions map, and instant video preview wall."
+    },
+    {
+      "id": "input_sources",
+      "title": "Ingest & Input Sources Management",
+      "description": "Configure SRT (Listener/Caller), RTMP, RTSP, HLS pull, WebRTC, NDI, and RIST feeds with stream keys, failover rules, and buffer latencies."
+    },
+    {
+      "id": "transcoding_codecs",
+      "title": "Transcoding Profiles & Hardware Encoding",
+      "description": "Manage multi-bitrate ladder generation, codec targets (H.264, H.265/HEVC, AV1, VP9), audio codecs (AAC, Opus), and GPU acceleration (NVENC, QSV)."
+    },
+    {
+      "id": "playlists_vod",
+      "title": "Playlists & VOD Archive",
+      "description": "Schedule continuous live playout loops, manage DVR recording storage retention, transmux VOD to HLS/DASH, and asset metadata."
+    },
+    {
+      "id": "analytics_reports",
+      "title": "Analytics & Cluster Diagnostics",
+      "description": "Interactive bandwidth and latency graphs, peak concurrent viewers (CCU), error heatmaps, frame drop metrics, and node CPU/GPU health."
+    },
+    {
+      "id": "access_control_security",
+      "title": "Access Control & DRM Security",
+      "description": "API keys, publishing tokens, geo-blocking, DRM encryption (AES-128, Widevine, FairPlay), and role-based user permissions."
+    }
+  ],
+  "image_urls": {
+    "live_control_room": "https://images.pexels.com/photos/39246336/pexels-photo-39246336.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    "video_studio_operator": "https://images.unsplash.com/photo-1780299511230-099abe21bf38?crop=entropy&cs=srgb&fm=jpg&q=85",
+    "audio_mixer_control": "https://images.unsplash.com/photo-1769755449144-32a12d5572c9?crop=entropy&cs=srgb&fm=jpg&q=85",
+    "broadcast_monitors": "https://images.unsplash.com/photo-1768222935380-0a3a76fbb42e?crop=entropy&cs=srgb&fm=jpg&q=85"
+  },
+  "instructions_to_main_agent": [
+    "Build a complete multi-tab or route-based dashboard interface for Stream Anywhere.",
+    "Ensure data-testid attributes are included on all interactive elements (buttons, inputs, tabs, row actions, filters).",
+    "Use high-density technical layouts with monospaced readouts for bitrates (e.g., '6.4 Mbps'), resolution ('1080p60'), codecs ('HEVC / AAC'), and keyframe intervals ('2.0s').",
+    "Integrate live interactive chart visualizations using Recharts or Lucide icons for stream metrics.",
+    "Include live preview modals/players with simulated HTML5 video / canvas stream displays and audio level meters.",
+    "Provide state controls to start/stop streams, trigger failover, modify transcoding profiles, and add new input sources.",
+    "Support dark theme by default with clean contrast for operational clarity."
+  ]
+}
