@@ -374,9 +374,14 @@ async def create_user(body: UserCreateBody, user: dict = Depends(require_role("a
 @api_router.delete("/users/{user_id}")
 async def delete_user(user_id: str, user: dict = Depends(require_role("admin"))):
     from bson import ObjectId
+    from bson.errors import InvalidId
     if str(user["_id"]) == user_id:
         raise HTTPException(400, "Cannot delete yourself")
-    res = await db.users.delete_one({"_id": ObjectId(user_id)})
+    try:
+        oid = ObjectId(user_id)
+    except InvalidId:
+        raise HTTPException(404, "User not found")
+    res = await db.users.delete_one({"_id": oid})
     if res.deleted_count == 0:
         raise HTTPException(404, "User not found")
     return {"ok": True}
