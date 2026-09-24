@@ -3,17 +3,19 @@ import { useAuth } from "@/context/AuthContext";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard, Radio, Cable, SlidersHorizontal, Film,
-  BarChart3, Users, Settings, LogOut, Signal, Menu, X,
+  BarChart3, Users, Settings, LogOut, Signal, Menu, X, Server, Activity,
 } from "lucide-react";
 import { useState } from "react";
 
 const NAV = [
   { to: "/", label: "Mission Control", icon: LayoutDashboard, end: true, testid: "nav-overview" },
+  { to: "/engine", label: "Media Server", icon: Server, testid: "nav-engine" },
   { to: "/streams", label: "Live Streams", icon: Radio, testid: "nav-streams" },
   { to: "/sources", label: "Input Sources", icon: Cable, testid: "nav-sources" },
   { to: "/transcoding", label: "Transcoding", icon: SlidersHorizontal, testid: "nav-transcoding" },
   { to: "/media", label: "VOD & Playout", icon: Film, testid: "nav-media" },
   { to: "/analytics", label: "Analytics", icon: BarChart3, testid: "nav-analytics" },
+  { to: "/system", label: "System & Server", icon: Activity, testid: "nav-system" },
   { to: "/users", label: "Access Control", icon: Users, adminOnly: true, testid: "nav-users" },
   { to: "/settings", label: "Settings", icon: Settings, testid: "nav-settings" },
 ];

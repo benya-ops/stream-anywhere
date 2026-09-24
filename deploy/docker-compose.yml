@@ -1,0 +1,53 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - MONGO_URL=mongodb://mongo:27017
+      - HLS_ROOT=/data/hls
+      - INGEST_LISTENERS_ENABLED=1
+    depends_on:
+      mongo:
+        condition: service_healthy
+    volumes:
+      - hls_data:/data/hls
+    ports:
+      - "1935:1935"                 # RTMP ingest (OBS / encoders)
+      - "9000-9010:9000-9010/udp"   # SRT ingest range
+    # Resource guard at the container level so streams can never take down the host
+    deploy:
+      resources:
+        limits:
+          cpus: "${BACKEND_CPUS:-4.0}"
+          memory: "${BACKEND_MEM:-4g}"
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+      args:
+        REACT_APP_BACKEND_URL: ""
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${HTTP_PORT:-80}:80"
+
+volumes:
+  mongo_data:
+  hls_data:

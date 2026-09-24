@@ -35,16 +35,35 @@ export default function SettingsPage() {
           <div className="mt-1.5 flex flex-wrap gap-1.5">{codecs.containers.map((d) => <CodecChip key={d}>{d}</CodecChip>)}</div>
         </Card>
 
+        <div className="rounded-lg border border-sky-500/30 bg-sky-500/5 p-5 lg:col-span-2">
+          <div className="mb-3 flex items-center gap-2 text-sky-400">
+            <Server className="h-4 w-4" />
+            <h3 className="font-display text-sm font-semibold">Deploy on your own Linux server — one command</h3>
+          </div>
+          <p className="mb-3 text-sm leading-relaxed text-slate-300">
+            Get the full production stack (MongoDB + FFmpeg media engine + web panel) running with a single command.
+            The installer sets up Docker, generates secrets, sizes resource limits to your host, opens ingest ports,
+            and starts everything — <span className="text-slate-100 font-medium">nothing to configure by hand</span>.
+          </p>
+          <pre className="overflow-x-auto rounded-lg border border-[#1E293B] bg-slate-950/70 p-3 font-mono text-sm text-emerald-400">sudo bash deploy/install.sh</pre>
+          <div className="mt-3 grid grid-cols-1 gap-2 font-mono text-[11px] text-slate-400 sm:grid-cols-3">
+            <div className="rounded border border-[#1E293B] bg-slate-950/40 p-2">Web: <span className="text-sky-400">http://&lt;server-ip&gt;/</span></div>
+            <div className="rounded border border-[#1E293B] bg-slate-950/40 p-2">RTMP in: <span className="text-emerald-400">rtmp://&lt;ip&gt;:1935/live/stream</span></div>
+            <div className="rounded border border-[#1E293B] bg-slate-950/40 p-2">SRT in: <span className="text-emerald-400">srt://&lt;ip&gt;:9000</span></div>
+          </div>
+          <p className="mt-3 font-mono text-[11px] text-slate-500">Full guide: deploy/README.md · auto-restart on crash/reboot · container CPU/RAM caps protect the host.</p>
+        </div>
+
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-5 lg:col-span-2">
           <div className="mb-2 flex items-center gap-2 text-amber-400">
             <Info className="h-4 w-4" />
-            <h3 className="font-display text-sm font-semibold">Deployment Note</h3>
+            <h3 className="font-display text-sm font-semibold">About this preview</h3>
           </div>
           <p className="text-sm leading-relaxed text-slate-300">
-            This is the <span className="text-slate-100 font-medium">control panel</span> for Stream Anywhere with full management, telemetry and analytics.
-            The actual media processing layer (RTMP/SRT ingest, FFmpeg transcoding, HLS/DASH packaging) runs on dedicated
-            broadcast nodes and is <span className="font-mono text-amber-400">simulated in this preview environment</span>.
-            To go fully live, connect the panel to a media server backend (self-hosted FFmpeg/GStreamer cluster or Flusonic/Nimble nodes).
+            The <span className="text-slate-100 font-medium">Media Server</span> page runs a <span className="text-emerald-400">real FFmpeg engine</span>
+            {" "}here (test patterns, URL pull, VOD, real HLS ABR output). External push ingest (OBS via RTMP/SRT) needs open
+            ports, so it activates once you run the one-command deployment above on your own server. The <span className="text-slate-100 font-medium">Live Streams</span>
+            {" "}page uses simulated telemetry for demo channels.
           </p>
         </div>
       </div>

@@ -8,6 +8,8 @@ import { Loading } from "@/components/common";
 import Login from "@/pages/Login";
 import Overview from "@/pages/Overview";
 import Streams from "@/pages/Streams";
+import Engine from "@/pages/Engine";
+import System from "@/pages/System";
 import Sources from "@/pages/Sources";
 import Transcoding from "@/pages/Transcoding";
 import Media from "@/pages/Media";
@@ -31,6 +33,8 @@ function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/" element={<Protected><Overview /></Protected>} />
             <Route path="/streams" element={<Protected><Streams /></Protected>} />
+            <Route path="/engine" element={<Protected><Engine /></Protected>} />
+            <Route path="/system" element={<Protected><System /></Protected>} />
             <Route path="/sources" element={<Protected><Sources /></Protected>} />
             <Route path="/transcoding" element={<Protected><Transcoding /></Protected>} />
             <Route path="/media" element={<Protected><Media /></Protected>} />

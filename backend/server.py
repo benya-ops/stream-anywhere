@@ -14,10 +14,15 @@ from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
+from fastapi.responses import FileResponse
+
 from db import db, client
 from auth import auth_router, get_current_user, require_role, seed_admin, hash_password
 from seed import seed_sample_data
 from simulate import live_metrics, series
+import engine
+import capabilities as caps
+import psutil
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("stream-anywhere")
@@ -388,6 +393,241 @@ async def delete_user(user_id: str, user: dict = Depends(require_role("admin")))
 
 
 # =====================================================================
+# Real Media Engine — FFmpeg transcoding + live HLS ABR
+# =====================================================================
+class ChannelBody(BaseModel):
+    name: str
+    source: str = "test"          # test | bars | url | srt-listen | rtmp-listen
+    source_url: str = ""          # used when source is a pull URL
+    ingest_port: int = 9000       # used by srt-listen / rtmp-listen
+    ladder: str = "720p"          # 1080p | 720p | 480p | single
+    video_codec: str = "H.264"
+    audio_codec: str = "AAC"
+    hw: str = "auto"              # auto | CPU | NVENC | VAAPI | QSV
+    push_url: str = ""            # optional RTMP/SRT push egress
+    region: str = "EU-West"
+
+
+class ProbeBody(BaseModel):
+    source: str
+
+
+def _chan_public(c: dict) -> dict:
+    c.pop("_id", None)
+    stats = engine.channel_stats(c["id"])
+    c["stats"] = stats
+    # only report live once the manifest + first segment exist (avoids player 404 race)
+    c["status"] = "live" if (stats["running"] and stats["has_master"]) else \
+        ("starting" if stats["running"] else c.get("status", "idle"))
+    if c["source"] == "srt-listen":
+        c["ingest_endpoint"] = f"srt://<server-ip>:{c.get('ingest_port', 9000)}?mode=caller"
+    elif c["source"] == "rtmp-listen":
+        c["ingest_endpoint"] = f"rtmp://<server-ip>:{c.get('ingest_port', 9000)}/live/stream"
+    c["playback_url"] = f"/api/hls/{c['id']}/master.m3u8"
+    return c
+
+
+@api_router.get("/engine/status")
+async def engine_status(user: dict = Depends(get_current_user)):
+    s = caps.summary()
+    s.update({"ladders": list(engine.LADDERS.keys()),
+              "active_encoders": engine.active_count(),
+              "listeners_enabled": engine.LISTENERS_ENABLED})
+    return s
+
+
+@api_router.get("/channels")
+async def list_channels(user: dict = Depends(get_current_user)):
+    docs = await db.channels.find({}, {"_id": 0}).to_list(200)
+    return [_chan_public(d) for d in docs]
+
+
+@api_router.get("/channels/{channel_id}")
+async def get_channel(channel_id: str, user: dict = Depends(get_current_user)):
+    doc = await db.channels.find_one({"id": channel_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Channel not found")
+    out = _chan_public(doc)
+    out["log"] = engine.tail_log(channel_id)
+    return out
+
+
+@api_router.post("/channels")
+async def create_channel(body: ChannelBody, user: dict = Depends(require_role("admin", "operator"))):
+    doc = {"id": new_id(), "created_at": now_iso(), "status": "idle", **body.model_dump()}
+    await db.channels.insert_one(doc)
+    return _chan_public({k: v for k, v in doc.items() if k != "_id"})
+
+
+@api_router.post("/channels/{channel_id}/start")
+async def start_channel(channel_id: str, user: dict = Depends(require_role("admin", "operator"))):
+    doc = await db.channels.find_one({"id": channel_id})
+    if not doc:
+        raise HTTPException(404, "Channel not found")
+    if not engine.ffmpeg_available():
+        raise HTTPException(503, "FFmpeg not available on host")
+    # resource guard — refuse to start if the host is overloaded (protects the server)
+    guard = await _get_guard()
+    if engine.active_count() >= guard["max_encoders"]:
+        raise HTTPException(429, f"Encoder limit reached ({guard['max_encoders']}). Stop a channel first.")
+    cpu = psutil.cpu_percent(interval=0.3)
+    if cpu >= guard["cpu_limit_pct"]:
+        raise HTTPException(429, f"CPU too high ({cpu:.0f}% ≥ {guard['cpu_limit_pct']}%). Refusing to start to protect the server.")
+    try:
+        engine.start_channel(channel_id, doc.get("source", "test"), doc.get("source_url", ""),
+                             int(doc.get("ingest_port", 9000)), doc.get("ladder", "720p"),
+                             doc.get("video_codec", "H.264"), doc.get("audio_codec", "AAC"),
+                             doc.get("hw", "auto"), doc.get("push_url", ""))
+    except Exception as e:
+        raise HTTPException(500, f"Failed to start encoder: {e}")
+    ready = await engine.wait_for_master(channel_id, timeout=25)
+    if not ready:
+        log = engine.tail_log(channel_id, 15)
+        engine.stop_channel(channel_id)
+        raise HTTPException(500, f"Encoder did not produce output. {log[-400:]}")
+    await db.channels.update_one({"id": channel_id}, {"$set": {"status": "live"}})
+    doc = await db.channels.find_one({"id": channel_id}, {"_id": 0})
+    return _chan_public(doc)
+
+
+@api_router.post("/channels/{channel_id}/stop")
+async def stop_channel(channel_id: str, user: dict = Depends(require_role("admin", "operator"))):
+    engine.stop_channel(channel_id)
+    await db.channels.update_one({"id": channel_id}, {"$set": {"status": "idle"}})
+    doc = await db.channels.find_one({"id": channel_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Channel not found")
+    return _chan_public(doc)
+
+
+@api_router.get("/channels/{channel_id}/stats")
+async def channel_stats(channel_id: str, user: dict = Depends(get_current_user)):
+    return {**engine.channel_stats(channel_id), "log": engine.tail_log(channel_id, 25)}
+
+
+@api_router.delete("/channels/{channel_id}")
+async def delete_channel(channel_id: str, user: dict = Depends(require_role("admin", "operator"))):
+    engine.stop_channel(channel_id)
+    res = await db.channels.delete_one({"id": channel_id})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Channel not found")
+    return {"ok": True}
+
+
+@api_router.post("/engine/probe")
+async def probe_source(body: ProbeBody, user: dict = Depends(require_role("admin", "operator"))):
+    return engine.probe(body.source)
+
+
+# ---------- System control & resource guard ----------
+DEFAULT_GUARD = {"max_encoders": 4, "cpu_limit_pct": 85}
+
+
+async def _get_guard() -> dict:
+    doc = await db.settings.find_one({"_id": "guard"})
+    if not doc:
+        return dict(DEFAULT_GUARD)
+    return {"max_encoders": doc.get("max_encoders", DEFAULT_GUARD["max_encoders"]),
+            "cpu_limit_pct": doc.get("cpu_limit_pct", DEFAULT_GUARD["cpu_limit_pct"])}
+
+
+class GuardBody(BaseModel):
+    max_encoders: int = 4
+    cpu_limit_pct: int = 85
+
+
+def _gpu_stats():
+    import shutil as _sh
+    import subprocess as _sp
+    if not _sh.which("nvidia-smi"):
+        return None
+    try:
+        out = _sp.run(["nvidia-smi", "--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu",
+                       "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=5)
+        gpus = []
+        for line in out.stdout.strip().splitlines():
+            p = [x.strip() for x in line.split(",")]
+            if len(p) >= 5:
+                gpus.append({"name": p[0], "util_pct": float(p[1]), "mem_used_mb": float(p[2]),
+                             "mem_total_mb": float(p[3]), "temp_c": float(p[4])})
+        return gpus
+    except Exception:
+        return None
+
+
+@api_router.get("/system/stats")
+async def system_stats(user: dict = Depends(get_current_user)):
+    vm = psutil.virtual_memory()
+    disk = psutil.disk_usage("/")
+    try:
+        load = psutil.getloadavg()
+    except Exception:
+        load = (0, 0, 0)
+    import time as _t
+    return {
+        "cpu_pct": psutil.cpu_percent(interval=0.3),
+        "cpu_cores": psutil.cpu_count(),
+        "load_avg": [round(x, 2) for x in load],
+        "mem_used_pct": vm.percent,
+        "mem_used_gb": round(vm.used / 1073741824, 2),
+        "mem_total_gb": round(vm.total / 1073741824, 2),
+        "disk_used_pct": disk.percent,
+        "disk_free_gb": round(disk.free / 1073741824, 1),
+        "uptime_s": int(_t.time() - psutil.boot_time()),
+        "gpu": _gpu_stats(),
+        "active_encoders": engine.active_count(),
+        "guard": await _get_guard(),
+    }
+
+
+@api_router.get("/system/capabilities")
+async def system_capabilities(user: dict = Depends(get_current_user)):
+    return caps.summary()
+
+
+@api_router.get("/system/guard")
+async def get_guard(user: dict = Depends(get_current_user)):
+    return await _get_guard()
+
+
+@api_router.put("/system/guard")
+async def set_guard(body: GuardBody, user: dict = Depends(require_role("admin"))):
+    await db.settings.update_one({"_id": "guard"},
+                                 {"$set": {"max_encoders": body.max_encoders,
+                                           "cpu_limit_pct": body.cpu_limit_pct}}, upsert=True)
+    return await _get_guard()
+
+
+@api_router.post("/system/engine/restart")
+async def restart_engine(user: dict = Depends(require_role("admin"))):
+    """Safe engine reset — stops all encoders without touching the control plane."""
+    n = engine.active_count()
+    engine.stop_all()
+    await db.channels.update_many({"status": "live"}, {"$set": {"status": "idle"}})
+    return {"ok": True, "stopped": n}
+
+
+# HLS delivery (public playback so the browser player can fetch segments)
+_MEDIA_TYPES = {".m3u8": "application/vnd.apple.mpegurl", ".ts": "video/mp2t",
+                ".m4s": "video/iso.segment", ".mp4": "video/mp4"}
+
+
+@app.get("/api/hls/{channel_id}/{filename}")
+async def serve_hls(channel_id: str, filename: str):
+    if ".." in filename or "/" in filename:
+        raise HTTPException(400, "Invalid path")
+    path = engine.channel_dir(channel_id) / filename
+    if not path.exists():
+        raise HTTPException(404, "Not found")
+    ext = path.suffix.lower()
+    media = _MEDIA_TYPES.get(ext, "application/octet-stream")
+    headers = {"Access-Control-Allow-Origin": "*"}
+    if ext == ".m3u8":
+        headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return FileResponse(str(path), media_type=media, headers=headers)
+
+
+# =====================================================================
 # Register routers + startup
 # =====================================================================
 api_router.include_router(auth_router)
@@ -410,9 +650,17 @@ async def startup():
     await db.streams.create_index("id")
     await seed_admin()
     await seed_sample_data()
-    logger.info("Stream Anywhere API ready.")
+    if await db.channels.count_documents({}) == 0:
+        await db.channels.insert_one({
+            "id": new_id(), "created_at": now_iso(), "status": "idle",
+            "name": "Demo — Test Pattern (1080p ABR)", "source": "test",
+            "ladder": "720p", "video_codec": "H.264", "audio_codec": "AAC", "region": "EU-West",
+        })
+    logger.info("Stream Anywhere API ready. FFmpeg=%s", engine.ffmpeg_available())
 
 
 @app.on_event("shutdown")
 async def shutdown():
+    for cid in list(engine._registry.keys()):
+        engine.stop_channel(cid)
     client.close()
