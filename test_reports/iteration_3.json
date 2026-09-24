@@ -1,0 +1,43 @@
+{
+  "summary": "Backend + deploy static + UI smoke of the new System/Server Control + Media Engine features. New test file /app/backend/tests/test_system.py exercises: /system/capabilities, /system/stats (real psutil), /system/guard GET+PUT with RBAC (operator/viewer 403), guard blocking /channels/{id}/start with HTTP 429 when max_encoders=0, /system/engine/restart stopping all encoders (admin-only), /engine/status new fields, real FFmpeg transcode with QC (test pattern -> healthy, no black/freeze; SMPTE bars -> freeze=true correctly detected via freezedetect), HLS master.m3u8/variant/.ts served with correct MIME, srt-listen/rtmp-listen gated (INGEST_LISTENERS_ENABLED=0 -> 500 with 'listener'/'disabled' error). Deploy static: install.sh passes bash -n, docker-compose.yml valid YAML with mongo/backend/web + backend ports 1935 & 9000-9010/udp + resource limits, Dockerfile.backend installs ffmpeg, nginx.conf proxies /api/ to backend:8001. Regression: 23/23 in backend_test.py still pass. UI: login OK, /system rings (CPU/Memory/Disk), Active Encoders + Uptime, capability groups (Hardware/Video/Audio/Ingest/Delivery), guard-max, guard-cpu, save-guard-btn, restart-engine-btn admin-only present and Save toast fires. /engine New Channel modal has ch-name/ch-source/ch-ladder/ch-video/ch-audio/ch-hw/ch-push; ch-url is shown when source=url; ch-port shown when source=srt-listen/rtmp-listen. RESULT: 20/20 new + 23/23 regression pass (parallel-xdist caused 1 transient CPU-guard 500 on HLS test — passes on rerun; not a product bug).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "N/A (test harness)", "issue": "Under pytest-xdist parallelism, spawning multiple concurrent FFmpeg encoders across workers can trip the CPU resource guard (>=85%) and cause a /channels/{id}/start to return 500 because engine.wait_for_master doesn't produce output within 25s. Rerun serially passes. Product behaviour is correct; consider running new engine tests with -n 1 or a dedicated xdist group."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_system.py",
+    "/app/backend/tests/test_engine.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/system_results.xml"
+  ],
+  "action_items": [
+    "Optional: pin engine/system tests to a single xdist worker (e.g., @pytest.mark.xdist_group or run with -n 1 for test_system.py) to avoid the transient CPU-guard race described above.",
+    "Optional (carried over from iteration_2): _chan_public already gates status='live' on has_master — verified good in this iteration."
+  ],
+  "critical_code_review_comments": [
+    "server.py::start_channel enforces guard both by encoder count AND CPU percent before spawning FFmpeg — good defensive posture (429 with clear message).",
+    "server.py::restart_engine correctly stops all encoders and resets DB status without touching the control plane. Idempotent.",
+    "capabilities.resolve_encoder falls back to CPU on missing HW encoder — safe.",
+    "engine.build_cmd injects blackdetect+freezedetect at the filter graph head so QC is inline (no extra probe process); count-based _qc_from_log is a lightweight heuristic and returns correct results in tests.",
+    "engine.py uses os.setsid + os.killpg for clean FFmpeg process-group termination — good.",
+    "deploy/docker-compose.yml sets INGEST_LISTENERS_ENABLED=1 for production and exposes 1935 + 9000-9010/udp with cpu/memory limits — matches design.",
+    "deploy/install.sh is idempotent (reuses .env if present), sizes cpus=nproc-1 and mem=total-1G, opens ufw ports only if ufw is active — solid one-command installer."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_system.py (new)"
+  ],
+  "success_rate": {"backend": "100% (20/20 new system tests, 23/23 regression, 10/10 engine)", "frontend": "100% UI smoke of /system and /engine modal fields"},
+  "test_credentials": "admin@streamanywhere.io / Broadcast2026!",
+  "seed_data_creation": "All TEST_ channels are self-cleaned. Guard restored to {max_encoders:4, cpu_limit_pct:85}. engine/restart called at teardown; active_encoders=0 confirmed.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "New system suite lives at /app/backend/tests/test_system.py. If re-running, prefer `pytest -o addopts='' /app/backend/tests/test_system.py` (serial) to avoid xdist workers stacking real FFmpeg encoders and tripping the CPU guard. Listeners are correctly disabled (INGEST_LISTENERS_ENABLED=0) in this preview env — the error text on /start is 'Push-ingest listeners are disabled ... deploy on a host with open ports'. Everything else is real.",
+  "rca of the issue": "No product bug found. Only a test-parallelism artefact: pytest-xdist with 2 workers spawning simultaneous FFmpeg pipelines pushed CPU >= guard.cpu_limit_pct (85%) on this shared preview host, causing wait_for_master to time out and /start to return 500. Running the same test serially passes 100%."
+}

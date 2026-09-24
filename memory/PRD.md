@@ -19,18 +19,16 @@ functionality + work with all codecs. Product name: **Stream Anywhere**.
 
 ## Implemented (2026-06)
 - Auth: register/login/logout/me/refresh/forgot/reset, brute-force lockout, RBAC.
-- Mission Control overview: KPIs, bandwidth/viewer charts, edge node health, live preview wall.
-- Live Streams: CRUD + start/stop/failover + preview modal, live-polling telemetry.
-- Input Sources: CRUD (SRT/RTMP/RTSP/WebRTC/NDI/RIST/WHIP).
-- Transcoding: profiles CRUD + ABR ladder + supported codec matrix (H.264/HEVC/AV1/VP9…).
-- VOD & Playout: VOD library CRUD + playout schedules.
-- Analytics: viewers/bandwidth/packet-loss charts (1h/6h/24h), top channels.
-- Access Control: admin user management (create/delete, roles).
-- Settings: account/engine/codec info + simulated-media note.
-- Tested: 23/23 backend pytest pass; all frontend flows pass (iteration_1.json).
+- Mission Control, Live Streams (simulated telemetry), Sources, Transcoding, VOD/Playout, Analytics, Access Control, Settings.
+- REAL Media Server (/engine): FFmpeg 5.1.9 transcoding -> live multi-bitrate HLS ABR, plays in-browser (hls.js). Sources: test pattern, SMPTE bars, URL pull, SRT/RTMP listeners (gated). Optional RTMP/SRT push egress. Inline QC (black/freeze/stalled). HW select auto/CPU/NVENC/VAAPI/QSV.
+- System & Server Control (/system): real host CPU/mem/disk/load/GPU (psutil), active encoders, uptime, resource guard (max encoders + CPU limit that blocks starts to protect the host), safe engine restart, capability matrix (codecs/protocols).
+- One-command Linux deploy (deploy/): Dockerized MongoDB + FFmpeg backend + nginx web; install.sh auto-installs Docker, generates secrets, sizes resource limits, opens ingest ports (1935 RTMP, 9000-9010 SRT), restart:unless-stopped.
+- Tested: iteration_1 (dashboard 23/23), iteration_2 (engine 10/10), iteration_3 (system 20/20 + regression). All green.
+
+## Environment limits (preview)
+- No GPU -> hw=CPU only. External push ingest (OBS RTMP/SRT) needs open ports -> activates via the one-command deployment. Playwright headless Chromium lacks H.264 so automated video playback check is N/A (real browsers play).
 
 ## Backlog / next
-- P1: Real media backend integration (FFmpeg/GStreamer or Flusonic/Nimble node bridge).
-- P1: WebRTC/HLS real playback in preview modal.
-- P2: DRM (Widevine/FairPlay), geo-blocking, publishing tokens/API keys UI.
-- P2: DVR scrubbing, alerts/notifications, per-stream historical retention.
+- P1: LL-HLS + simultaneous MPEG-DASH packaging output.
+- P1: Multi-node/edge clustering + load balancing.
+- P2: DRM (Widevine/FairPlay), auth tokens/geo-blocking, alerting/webhooks, DVR scrubbing.
