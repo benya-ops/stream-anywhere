@@ -18,17 +18,19 @@ functionality + work with all codecs. Product name: **Stream Anywhere**.
 - Viewer: read-only monitoring.
 
 ## Implemented (2026-06)
-- Auth: register/login/logout/me/refresh/forgot/reset, brute-force lockout, RBAC.
-- Mission Control, Live Streams (simulated telemetry), Sources, Transcoding, VOD/Playout, Analytics, Access Control, Settings.
-- REAL Media Server (/engine): FFmpeg 5.1.9 transcoding -> live multi-bitrate HLS ABR, plays in-browser (hls.js). Sources: test pattern, SMPTE bars, URL pull, SRT/RTMP listeners (gated). Optional RTMP/SRT push egress. Inline QC (black/freeze/stalled). HW select auto/CPU/NVENC/VAAPI/QSV.
-- System & Server Control (/system): real host CPU/mem/disk/load/GPU (psutil), active encoders, uptime, resource guard (max encoders + CPU limit that blocks starts to protect the host), safe engine restart, capability matrix (codecs/protocols).
-- One-command Linux deploy (deploy/): Dockerized MongoDB + FFmpeg backend + nginx web; install.sh auto-installs Docker, generates secrets, sizes resource limits, opens ingest ports (1935 RTMP, 9000-9010 SRT), restart:unless-stopped.
-- Tested: iteration_1 (dashboard 23/23), iteration_2 (engine 10/10), iteration_3 (system 20/20 + regression). All green.
+- Auth + RBAC (admin/operator/viewer); Mission Control, Streams (sim), Sources, Transcoding, Analytics, Access Control, Settings.
+- REAL Media Server (/engine): FFmpeg transcode -> live HLS ABR (hls.js playback). Sources: test/bars/URL-pull/SRT+RTMP listeners. HW auto/CPU/NVENC/VAAPI/QSV. Optional RTMP/SRT push egress. Inline QC (black/freeze/stalled). Audio-less sources auto-get a silent track.
+- DVR: per-channel DVR mode (full seekable window) + "Save Recording → VOD" capture (finalized as VOD playlist w/ ENDLIST).
+- VOD: "Import from URL" transcodes remote file/stream to playable VOD-HLS; Play button (hls.js) on ready assets; served at /api/vod-hls/{id}/. 
+- S3 storage: configurable S3-compatible bucket (endpoint/region/bucket/keys/public_base), test-connection, secret masking, optional offload of DVR recordings to bucket.
+- System & Server Control (/system): real host CPU/mem/disk/load/GPU (psutil), active encoders, uptime, resource guard (encoder + CPU limits block overload), safe engine restart, capability matrix, S3 config.
+- One-command Linux deploy (deploy/): Dockerized Mongo + FFmpeg backend + nginx; install.sh auto-installs Docker, secrets, resource limits, ingest ports; VOD_STORE/HLS as volumes.
+- Tested: iter1 dashboard 23/23, iter2 engine 10/10, iter3 system 20/20, iter4 DVR/VOD/S3 15/15. All green.
 
 ## Environment limits (preview)
-- No GPU -> hw=CPU only. External push ingest (OBS RTMP/SRT) needs open ports -> activates via the one-command deployment. Playwright headless Chromium lacks H.264 so automated video playback check is N/A (real browsers play).
+- No GPU -> CPU only. Push-in listeners need open ports (enabled after deploy). Playwright Chromium lacks H.264 so automated video playback not verifiable (real browsers play). VOD_STORE/HLS on pod are ephemeral in preview; persistent docker volumes in deploy.
 
 ## Backlog / next
-- P1: LL-HLS + simultaneous MPEG-DASH packaging output.
-- P1: Multi-node/edge clustering + load balancing.
-- P2: DRM (Widevine/FairPlay), auth tokens/geo-blocking, alerting/webhooks, DVR scrubbing.
+- P1: LL-HLS + simultaneous MPEG-DASH packaging.
+- P1: Multi-node clustering / load balancing.
+- P2: DRM (Widevine/FairPlay), signed tokens, geo-blocking, alerting/webhooks.

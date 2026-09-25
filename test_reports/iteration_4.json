@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 4 covers: S3 storage config (GET/PUT/test) + RBAC + mask-preservation, VOD Import (real ffmpeg transcode), DVR channel record-to-VOD, VOD list enrichment, and engine/system regression. New file /app/backend/tests/test_storage_vod_dvr.py (15 tests). 14/15 pass. One CRITICAL product bug found: POST /api/vod/import fails to reach 'ready' when the source URL has no audio track (the exact URL specified in the review request — Big_Buck_Bunny_360_10s_1MB.mp4 has no audio stream). engine.start_vod_transcode uses -map 0:a:0? (optional) but the HLS -var_stream_map still declares 'a:0' for every rung, so the HLS muxer errors with 'Unable to map stream at a:0 / Variant stream info update failed'. FFmpeg exits with 'Conversion failed!' and vod_status returns status='error'. All other flows (DVR record on a channel with audio, storage config + masking + RBAC, regression endpoints) pass. UI smoke on /media, /engine, /system confirms all requested data-testid selectors are present (import-vod-btn + imp-* + do-import modal fields, ch-dvr checkbox in New Channel modal, S3 card with s3-endpoint/region/bucket/public/access/secret/enabled/test-btn/save-btn). play-vod-{id} + record-channel-btn were not visible because no playable VOD or running channel existed at that moment (they only render conditionally) — the code paths are present in Media.jsx / Engine.jsx.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/vod/import",
+        "issue": "Transcode fails with FFmpeg 'Unable to map stream at a:0 / Variant stream info update failed' when the source URL has no audio track. Repro: POST /api/vod/import {title, source_url:'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4', ladder:'480p'} -> vod_status polls converge to status='error'. Root cause: engine.start_vod_transcode() builds a per-rung mapping with `-map 0:a:0?` (optional map -> no output audio stream) but the HLS muxer's -var_stream_map still enumerates 'v:i,a:i' for every i, so hls_mux cannot bind the a:i output and aborts. Fix options: (a) probe the input for audio with ffprobe and drop the 'a:i' entries from -var_stream_map (and the -c:a/-b:a/ac mappings) when no audio stream exists; or (b) synthesise silence via -f lavfi -i anullsrc when audio is missing. The DVR path is unaffected because live channels use the 'test'/'bars' lavfi sources which always include audio.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_storage_vod_dvr.py",
+    "/app/test_reports/pytest/iter4_results.xml"
+  ],
+  "action_items": [
+    "Fix /api/vod/import to support audio-less inputs — probe with ffprobe and either (a) omit 'a:i' from -var_stream_map + drop -map 0:a:0? and -c:a/-b:a lines, or (b) inject `-f lavfi -i anullsrc=cl=stereo:r=48000` as a second input and map that as a:0. Recommend (b) so every HLS asset has a consistent stereo track. After the fix, rerun TestVodImport::test_import_transcode_and_playback."
+  ],
+  "critical_code_review_comments": [
+    "engine.start_vod_transcode assumes the input always has audio when building -var_stream_map, but pairs it with optional audio mapping `-map 0:a:0?`. The two are inconsistent and break HLS ABR muxing for silent MP4s (see bug above).",
+    "server.set_storage correctly preserves the previously-stored access_key/secret_key when the client submits masked/blank values — good.",
+    "storage.masked returns has_credentials only when BOTH access_key and secret_key are set — correct.",
+    "server._enrich_vod skips engine.vod_status when storage=='s3' — correct (asset is remote).",
+    "record_channel_to_vod path (engine._finalize_vod_playlists) correctly upgrades EVENT playlists to VOD + appends ENDLIST — verified via curl on the generated stream_*.m3u8."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_storage_vod_dvr.py (new)"
+  ],
+  "success_rate": {"backend": "93% (14/15) — 1 critical product bug on /api/vod/import with audio-less source", "frontend": "100% smoke of /media, /engine (New Channel modal), /system S3 card"},
+  "test_credentials": "admin@streamanywhere.io / Broadcast2026!",
+  "seed_data_creation": "All TEST_ users/channels/VODs self-cleaned. S3 storage config disabled at end of module (test_disable_at_end). Engine restarted via /api/system/engine/restart at end of regression class.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Re-run `pytest -o addopts='' /app/backend/tests/test_storage_vod_dvr.py -v` after the audio-less input fix. The DVR record test spawns a real FFmpeg encoder for 12s + record; on shared CI this may occasionally trip the CPU guard — skip is emitted in that case. If /api/vod/import is fixed to synthesise silent audio, no test changes needed; if instead the fix drops the audio track for silent inputs, the test remains valid because it only checks master.m3u8 + ENDLIST on the variant.",
+  "rca of the issue": "engine.start_vod_transcode(): filter graph does not emit an audio pad, and audio is added only via `-map 0:a:0?` (optional). For an input MP4 without an audio stream, this optional map yields zero audio outputs. However the HLS muxer is invoked with `-var_stream_map 'v:0,a:0 v:1,a:1 ...'`, which requires an 'a:i' output stream for each rung. FFmpeg logs: `[hls] Unable to map stream at a:0 / Variant stream info update failed with status ffffffea / Could not write header for output file #0 (incorrect codec parameters ?): Invalid argument`. Process exits non-zero, vod_status returns 'error'. Mitigation: add an anullsrc lavfi input `-f lavfi -i anullsrc=cl=stereo:r=48000` and `-shortest`, then map `-map 1:a:0` per rung when input audio is absent (probed via ffprobe)."
+}

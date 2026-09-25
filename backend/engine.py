@@ -56,22 +56,42 @@ def active_count() -> int:
     return sum(1 for cid in list(_registry) if is_running(cid))
 
 
+def _has_audio(source: str) -> bool:
+    if not shutil.which("ffprobe"):
+        return True
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a",
+             "-show_entries", "stream=index", "-of", "csv=p=0", source],
+            capture_output=True, text=True, timeout=15)
+        return bool(out.stdout.strip())
+    except Exception:
+        return True
+
+
+_ANULL = ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
+
+
 def _input_args(source: str, source_url: str, ingest_port: int):
+    """Return (input_args, audio_map, need_shortest)."""
     if source == "test":
         return (["-re", "-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=30",
-                 "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000"], True, "1:a:0")
+                 "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000"], "1:a:0", False)
     if source == "bars":
         return (["-re", "-f", "lavfi", "-i", "smptehdbars=size=1920x1080:rate=30",
-                 "-f", "lavfi", "-i", "sine=frequency=1000:sample_rate=48000"], True, "1:a:0")
+                 "-f", "lavfi", "-i", "sine=frequency=1000:sample_rate=48000"], "1:a:0", False)
     if source == "srt-listen":
         url = f"srt://0.0.0.0:{ingest_port}?mode=listener&latency=200"
-        return (["-i", url], False, "0:a:0?")
+        return (["-i", url], "0:a:0", False)
     if source == "rtmp-listen":
         url = f"rtmp://0.0.0.0:{ingest_port}/live/stream"
-        return (["-f", "live_flv", "-listen", "1", "-i", url], False, "0:a:0?")
-    # pull URL
-    pre = ["-stream_loop", "-1", "-re"] if re.search(r"\.(mp4|mkv|mov|ts)$", source_url or source, re.I) else []
-    return (pre + ["-i", source_url or source], False, "0:a:0?")
+        return (["-f", "live_flv", "-listen", "1", "-i", url], "0:a:0", False)
+    # pull URL — probe for audio, synthesise a silent track if none
+    url = source_url or source
+    pre = ["-stream_loop", "-1", "-re"] if re.search(r"\.(mp4|mkv|mov|ts)$", url, re.I) else []
+    if _has_audio(url):
+        return (pre + ["-i", url], "0:a:0", False)
+    return (pre + ["-i", url] + _ANULL, "1:a:0", True)
 
 
 def _hw_device_args(hw: str):
@@ -96,7 +116,7 @@ def build_cmd(channel_id: str, source: str, source_url: str, ingest_port: int,
     rungs = LADDERS.get(ladder_key, LADDERS["720p"])
     venc, eff_hw = caps.resolve_encoder(video_codec, hw)
     aenc = caps.audio_encoder(audio_codec)
-    in_args, _has_audio, audio_map = _input_args(source, source_url, ingest_port)
+    in_args, audio_map, need_shortest = _input_args(source, source_url, ingest_port)
 
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "info"]
     cmd += _hw_device_args(eff_hw)
@@ -125,6 +145,8 @@ def build_cmd(channel_id: str, source: str, source_url: str, ingest_port: int,
         var_map.append(f"v:{i},a:{i}")
 
     d = channel_dir(channel_id)
+    if need_shortest:
+        cmd += ["-shortest"]
     if dvr:
         # DVR: keep the whole window (seekable), event playlist, no segment deletion
         hls_flags = "independent_segments+program_date_time+append_list"
@@ -297,6 +319,12 @@ def start_vod_transcode(vid: str, source: str, ladder_key: str = "720p",
 
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "info"] + _hw_device_args(eff_hw)
     cmd += ["-i", source]
+    has_audio = _has_audio(source)
+    if not has_audio:
+        cmd += _ANULL
+        audio_in = "1:a:0"
+    else:
+        audio_in = "0:a:0"
     n = len(rungs)
     head = f"[0:v]split={n}" + "".join(f"[v{i}]" for i in range(n)) + ";"
     scales = ";".join(f"[v{i}]scale=w=-2:h={r[0]}{_scale_suffix(eff_hw)}[v{i}out]"
@@ -310,8 +338,10 @@ def start_vod_transcode(vid: str, source: str, ladder_key: str = "720p",
         elif venc.endswith("nvenc"):
             cmd += [f"-preset:v:{i}", "p4"]
         cmd += [f"-b:v:{i}", f"{vk}k", "-g", "60", "-keyint_min", "60", "-sc_threshold", "0"]
-        cmd += ["-map", "0:a:0?", f"-c:a:{i}", aenc, f"-b:a:{i}", f"{ak}k", "-ac", "2"]
+        cmd += ["-map", audio_in, f"-c:a:{i}", aenc, f"-b:a:{i}", f"{ak}k", "-ac", "2"]
         var_map.append(f"v:{i},a:{i}")
+    if not has_audio:
+        cmd += ["-shortest"]
     cmd += [
         "-f", "hls", "-hls_time", "6", "-hls_list_size", "0",
         "-hls_playlist_type", "vod", "-hls_flags", "independent_segments",
