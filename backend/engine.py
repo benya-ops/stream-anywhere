@@ -92,7 +92,7 @@ def _scale_suffix(hw: str):
 
 def build_cmd(channel_id: str, source: str, source_url: str, ingest_port: int,
               ladder_key: str, video_codec: str, audio_codec: str, hw: str,
-              push_url: str = "") -> tuple:
+              push_url: str = "", dvr: bool = False) -> tuple:
     rungs = LADDERS.get(ladder_key, LADDERS["720p"])
     venc, eff_hw = caps.resolve_encoder(video_codec, hw)
     aenc = caps.audio_encoder(audio_codec)
@@ -125,9 +125,16 @@ def build_cmd(channel_id: str, source: str, source_url: str, ingest_port: int,
         var_map.append(f"v:{i},a:{i}")
 
     d = channel_dir(channel_id)
+    if dvr:
+        # DVR: keep the whole window (seekable), event playlist, no segment deletion
+        hls_flags = "independent_segments+program_date_time+append_list"
+        hls_tail = ["-hls_list_size", "0", "-hls_playlist_type", "event"]
+    else:
+        hls_flags = "independent_segments+delete_segments+program_date_time"
+        hls_tail = ["-hls_list_size", "6"]
     cmd += [
-        "-f", "hls", "-hls_time", "4", "-hls_list_size", "6",
-        "-hls_flags", "independent_segments+delete_segments+program_date_time",
+        "-f", "hls", "-hls_time", "4", *hls_tail,
+        "-hls_flags", hls_flags,
         "-hls_segment_type", "mpegts",
         "-hls_segment_filename", str(d / "seg_%v_%03d.ts"),
         "-master_pl_name", "master.m3u8",
@@ -154,7 +161,7 @@ def _preexec():
 
 def start_channel(channel_id: str, source: str, source_url: str, ingest_port: int,
                   ladder_key: str, video_codec: str, audio_codec: str, hw: str,
-                  push_url: str = "") -> dict:
+                  push_url: str = "", dvr: bool = False) -> dict:
     if not ffmpeg_available():
         raise RuntimeError("FFmpeg is not installed on this host.")
     if source in ("srt-listen", "rtmp-listen") and not LISTENERS_ENABLED:
@@ -169,7 +176,7 @@ def start_channel(channel_id: str, source: str, source_url: str, ingest_port: in
     d.mkdir(parents=True, exist_ok=True)
 
     cmd, eff_hw = build_cmd(channel_id, source, source_url, ingest_port, ladder_key,
-                            video_codec, audio_codec, hw, push_url)
+                            video_codec, audio_codec, hw, push_url, dvr)
     log_file = open(d / "ffmpeg.log", "wb")
     proc = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT, preexec_fn=_preexec)
     _registry[channel_id] = {
@@ -261,3 +268,110 @@ def probe(source: str) -> dict:
 def stop_all():
     for cid in list(_registry):
         stop_channel(cid)
+
+
+# =====================================================================
+# VOD: transcode a file/URL to a seekable VOD-HLS ladder, and capture DVR
+# =====================================================================
+VOD_STORE = Path(os.environ.get("VOD_STORE", "/app/backend/vod_store"))
+VOD_STORE.mkdir(parents=True, exist_ok=True)
+_vod_procs: dict = {}
+
+
+def vod_dir(vid: str) -> Path:
+    return VOD_STORE / vid
+
+
+def start_vod_transcode(vid: str, source: str, ladder_key: str = "720p",
+                        video_codec: str = "H.264", audio_codec: str = "AAC",
+                        hw: str = "auto") -> dict:
+    if not ffmpeg_available():
+        raise RuntimeError("FFmpeg not installed.")
+    rungs = LADDERS.get(ladder_key, LADDERS["720p"])
+    venc, eff_hw = caps.resolve_encoder(video_codec, hw)
+    aenc = caps.audio_encoder(audio_codec)
+    d = vod_dir(vid)
+    if d.exists():
+        shutil.rmtree(d, ignore_errors=True)
+    d.mkdir(parents=True, exist_ok=True)
+
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "info"] + _hw_device_args(eff_hw)
+    cmd += ["-i", source]
+    n = len(rungs)
+    head = f"[0:v]split={n}" + "".join(f"[v{i}]" for i in range(n)) + ";"
+    scales = ";".join(f"[v{i}]scale=w=-2:h={r[0]}{_scale_suffix(eff_hw)}[v{i}out]"
+                      for i, r in enumerate(rungs))
+    cmd += ["-filter_complex", head + scales]
+    var_map = []
+    for i, (h, vk, ak) in enumerate(rungs):
+        cmd += ["-map", f"[v{i}out]", f"-c:v:{i}", venc]
+        if venc in ("libx264", "libx265"):
+            cmd += [f"-preset:v:{i}", "veryfast"]
+        elif venc.endswith("nvenc"):
+            cmd += [f"-preset:v:{i}", "p4"]
+        cmd += [f"-b:v:{i}", f"{vk}k", "-g", "60", "-keyint_min", "60", "-sc_threshold", "0"]
+        cmd += ["-map", "0:a:0?", f"-c:a:{i}", aenc, f"-b:a:{i}", f"{ak}k", "-ac", "2"]
+        var_map.append(f"v:{i},a:{i}")
+    cmd += [
+        "-f", "hls", "-hls_time", "6", "-hls_list_size", "0",
+        "-hls_playlist_type", "vod", "-hls_flags", "independent_segments",
+        "-hls_segment_type", "mpegts",
+        "-hls_segment_filename", str(d / "seg_%v_%03d.ts"),
+        "-master_pl_name", "master.m3u8",
+        "-var_stream_map", " ".join(var_map),
+        str(d / "stream_%v.m3u8"),
+    ]
+    log = open(d / "ffmpeg.log", "wb")
+    proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, preexec_fn=_preexec)
+    _vod_procs[vid] = proc
+    return {"pid": proc.pid, "hw": eff_hw}
+
+
+def vod_status(vid: str) -> dict:
+    d = vod_dir(vid)
+    has_master = (d / "master.m3u8").exists()
+    proc = _vod_procs.get(vid)
+    running = bool(proc and proc.poll() is None)
+    if running:
+        status = "transcoding"
+    elif has_master:
+        status = "ready"
+    elif proc is not None:
+        status = "error"
+    else:
+        status = "ready" if has_master else "unknown"
+    segs = list(d.glob("seg_*.ts")) if d.exists() else []
+    return {"status": status, "has_master": has_master, "segments": len(segs),
+            "size_gb": round(sum(s.stat().st_size for s in segs) / 1073741824, 3) if segs else 0.0}
+
+
+def _finalize_vod_playlists(d: Path):
+    """Turn live/event HLS playlists into seekable VOD playlists."""
+    for pl in d.glob("stream_*.m3u8"):
+        txt = pl.read_text(errors="ignore")
+        if "#EXT-X-PLAYLIST-TYPE:EVENT" in txt:
+            txt = txt.replace("#EXT-X-PLAYLIST-TYPE:EVENT", "#EXT-X-PLAYLIST-TYPE:VOD")
+        elif "#EXT-X-PLAYLIST-TYPE" not in txt:
+            txt = txt.replace("#EXT-X-VERSION:6", "#EXT-X-VERSION:6\n#EXT-X-PLAYLIST-TYPE:VOD", 1)
+        if "#EXT-X-ENDLIST" not in txt:
+            txt = txt.rstrip() + "\n#EXT-X-ENDLIST\n"
+        pl.write_text(txt)
+
+
+def record_channel_to_vod(channel_id: str, vid: str) -> dict:
+    """Snapshot a running channel's HLS window into a permanent VOD asset."""
+    src = channel_dir(channel_id)
+    if not (src / "master.m3u8").exists():
+        raise RuntimeError("Channel has no output to record yet.")
+    dst = vod_dir(vid)
+    if dst.exists():
+        shutil.rmtree(dst, ignore_errors=True)
+    shutil.copytree(src, dst)
+    _finalize_vod_playlists(dst)
+    segs = list(dst.glob("seg_*.ts"))
+    variants = len(list(dst.glob("stream_*.m3u8")))
+    # approx duration = segments per variant * 4s
+    per_variant = max(1, len(segs) // max(1, variants))
+    return {"duration_s": per_variant * 4,
+            "size_gb": round(sum(s.stat().st_size for s in segs) / 1073741824, 3)}
+

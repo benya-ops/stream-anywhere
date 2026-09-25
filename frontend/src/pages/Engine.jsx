@@ -4,9 +4,9 @@ import { PageHeader, Loading, StatusBadge, Readout, CodecChip } from "@/componen
 import Modal, { TextField, SelectField, PrimaryButton, GhostButton } from "@/components/Modal";
 import HlsPlayer from "@/components/HlsPlayer";
 import { toast } from "sonner";
-import { Plus, Play, Square, Trash2, Server, Radio, Terminal, Search, Loader2 } from "lucide-react";
+import { Plus, Play, Square, Trash2, Server, Radio, Terminal, Search, Loader2, Save } from "lucide-react";
 
-const empty = { name: "", source: "test", source_url: "", ingest_port: 9000, ladder: "720p", video_codec: "H.264", audio_codec: "AAC", hw: "auto", push_url: "", region: "EU-West" };
+const empty = { name: "", source: "test", source_url: "", ingest_port: 9000, ladder: "720p", video_codec: "H.264", audio_codec: "AAC", hw: "auto", push_url: "", dvr: false, region: "EU-West" };
 
 export default function Engine() {
   const [channels, setChannels] = useState(null);
@@ -55,6 +55,11 @@ export default function Engine() {
 
   const remove = async (id) => {
     try { await api.delete(`/channels/${id}`); toast.success("Channel deleted"); if (selected?.id === id) setSelected(null); load(); }
+    catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
+  const record = async (ch) => {
+    try { const { data } = await api.post(`/channels/${ch.id}/record`); toast.success(`Saved DVR recording (${data.duration_s}s) to VOD library`); }
     catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
@@ -166,6 +171,12 @@ export default function Engine() {
                   <Trash2 className="h-4 w-4" /> Delete
                 </button>
                 {selected.stats?.has_master && (
+                  <button data-testid="record-channel-btn" onClick={() => record(selected)}
+                    className="flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-400 hover:bg-emerald-500/20">
+                    <Save className="h-4 w-4" /> Save Recording → VOD
+                  </button>
+                )}
+                {selected.stats?.has_master && (
                   <a data-testid="playback-link" href={`${process.env.REACT_APP_BACKEND_URL}${selected.playback_url}`} target="_blank" rel="noreferrer"
                     className="ml-auto font-mono text-xs text-sky-400 hover:underline">open .m3u8 ↗</a>
                 )}
@@ -243,6 +254,10 @@ export default function Engine() {
           <SelectField label="Audio Codec" testid="ch-audio" value={form.audio_codec} onChange={(v) => setForm({ ...form, audio_codec: v })} options={status.audio_codecs} />
           <SelectField label="Transcoding Hardware" testid="ch-hw" value={form.hw} onChange={(v) => setForm({ ...form, hw: v })} options={["auto", ...(status.hardware_accels || ["CPU"])]} />
           <TextField label="Push Egress (optional)" testid="ch-push" value={form.push_url} onChange={(v) => setForm({ ...form, push_url: v })} placeholder="rtmp://cdn/live/key · srt://…" />
+          <label className="sm:col-span-2 flex items-center gap-2.5 rounded-lg border border-[#1E293B] bg-slate-950/40 px-3 py-2.5 cursor-pointer">
+            <input type="checkbox" data-testid="ch-dvr" checked={form.dvr} onChange={(e) => setForm({ ...form, dvr: e.target.checked })} className="h-4 w-4 accent-sky-500" />
+            <span className="text-sm text-slate-300">Enable <span className="font-medium text-slate-100">DVR</span> — keep the full seekable window so you can rewind & save recordings</span>
+          </label>
         </div>
         <p className="mt-3 font-mono text-[11px] text-slate-500">
           {status.listeners_enabled ? "Listeners enabled — push from OBS to the ingest port." : "Test Pattern / Bars / URL pull work here. SRT/RTMP listeners require the one-command deployment (open ports)."}

@@ -3,7 +3,7 @@ import api, { formatApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { PageHeader, Loading, CodecChip, Readout, StatusBadge } from "@/components/common";
 import { toast } from "sonner";
-import { Cpu, MemoryStick, HardDrive, Activity, Gauge, RefreshCw, Shield, Server } from "lucide-react";
+import { Cpu, MemoryStick, HardDrive, Activity, Gauge, RefreshCw, Shield, Server, Cloud, Save } from "lucide-react";
 
 function Ring({ label, value, sub, icon: Icon, danger }) {
   const pct = Math.min(100, Math.max(0, value));
@@ -34,10 +34,11 @@ export default function System() {
   const [stats, setStats] = useState(null);
   const [caps, setCaps] = useState(null);
   const [guard, setGuard] = useState({ max_encoders: 4, cpu_limit_pct: 85 });
+  const [s3, setS3] = useState(null);
 
   const load = async () => {
-    const [s, c] = await Promise.all([api.get("/system/stats"), api.get("/system/capabilities")]);
-    setStats(s.data); setCaps(c.data); setGuard(s.data.guard);
+    const [s, c, st] = await Promise.all([api.get("/system/stats"), api.get("/system/capabilities"), api.get("/system/storage")]);
+    setStats(s.data); setCaps(c.data); setGuard(s.data.guard); setS3(st.data);
   };
   useEffect(() => {
     load();
@@ -53,8 +54,16 @@ export default function System() {
     try { const { data } = await api.post("/system/engine/restart"); toast.success(`Engine reset — ${data.stopped} encoder(s) stopped`); load(); }
     catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
+  const saveS3 = async () => {
+    try { const { data } = await api.put("/system/storage", s3); setS3(data); toast.success("Storage settings saved"); }
+    catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+  const testS3 = async () => {
+    try { const { data } = await api.post("/system/storage/test", s3); data.ok ? toast.success(data.message) : toast.error(data.error); }
+    catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
 
-  if (!stats || !caps) return <Loading />;
+  if (!stats || !caps || !s3) return <Loading />;
   const upH = Math.floor(stats.uptime_s / 3600), upM = Math.floor((stats.uptime_s % 3600) / 60);
   const isAdmin = user?.role === "admin";
 
@@ -133,6 +142,33 @@ export default function System() {
           <Group title="Delivery" items={caps.output_protocols} />
         </div>
       </div>
+
+      {/* S3 object storage */}
+      <div className="rounded-lg border border-[#1E293B] bg-[#0F172A]/80 p-5">
+        <div className="mb-4 flex items-center gap-2">
+          <Cloud className="h-4 w-4 text-emerald-400" />
+          <h3 className="font-mono text-xs uppercase tracking-widest text-slate-400">S3 Object Storage (VOD / Recordings)</h3>
+          <StatusBadge status={s3.enabled ? "connected" : "standby"} label={s3.enabled ? "ENABLED" : "DISABLED"} />
+        </div>
+        <p className="mb-4 text-sm text-slate-400">Connect any S3-compatible bucket (AWS S3, MinIO, Backblaze, Wasabi…). When enabled, saved DVR recordings are offloaded to your bucket and served from there.</p>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <SField label="Endpoint URL (blank = AWS)" testid="s3-endpoint" value={s3.endpoint_url} on={(v) => setS3({ ...s3, endpoint_url: v })} ph="https://s3.eu-central-1.amazonaws.com" admin={isAdmin} />
+          <SField label="Region" testid="s3-region" value={s3.region} on={(v) => setS3({ ...s3, region: v })} ph="us-east-1" admin={isAdmin} />
+          <SField label="Bucket" testid="s3-bucket" value={s3.bucket} on={(v) => setS3({ ...s3, bucket: v })} ph="my-vod-bucket" admin={isAdmin} />
+          <SField label="Public Base URL (CDN, optional)" testid="s3-public" value={s3.public_base} on={(v) => setS3({ ...s3, public_base: v })} ph="https://cdn.example.com" admin={isAdmin} />
+          <SField label="Access Key" testid="s3-access" value={s3.access_key} on={(v) => setS3({ ...s3, access_key: v })} ph="AKIA…" admin={isAdmin} />
+          <SField label="Secret Key" testid="s3-secret" value={s3.secret_key} on={(v) => setS3({ ...s3, secret_key: v })} ph="••••••" admin={isAdmin} type="password" />
+        </div>
+        {isAdmin && (
+          <div className="mt-4 flex items-center gap-2">
+            <label className="flex items-center gap-2 text-sm text-slate-300">
+              <input type="checkbox" data-testid="s3-enabled" checked={s3.enabled} onChange={(e) => setS3({ ...s3, enabled: e.target.checked })} className="h-4 w-4 accent-emerald-500" /> Enabled
+            </label>
+            <button data-testid="s3-test-btn" onClick={testS3} className="ml-auto rounded-lg border border-[#1E293B] px-4 py-2 text-sm text-slate-300 hover:bg-[#1E293B]">Test Connection</button>
+            <button data-testid="s3-save-btn" onClick={saveS3} className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 px-4 py-2 font-display text-sm font-semibold text-white hover:scale-[1.02] transition-transform"><Save className="h-4 w-4" /> Save Storage</button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -142,6 +178,17 @@ function Group({ title, items }) {
     <div className="mb-3">
       <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wider text-slate-500">{title}</p>
       <div className="flex flex-wrap gap-1.5">{(items || []).map((x) => <CodecChip key={x}>{x}</CodecChip>)}</div>
+    </div>
+  );
+}
+
+function SField({ label, value, on, ph, admin, testid, type = "text" }) {
+  return (
+    <div>
+      <label className="mb-1.5 block font-mono text-[11px] uppercase tracking-wider text-slate-400">{label}</label>
+      <input data-testid={testid} type={type} value={value || ""} disabled={!admin} placeholder={ph}
+        onChange={(e) => on(e.target.value)}
+        className="w-full rounded-lg border border-[#1E293B] bg-slate-950/60 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/50 disabled:opacity-50 placeholder:text-slate-600" />
     </div>
   );
 }

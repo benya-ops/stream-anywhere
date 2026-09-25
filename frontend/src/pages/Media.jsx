@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import api, { formatApiError } from "@/lib/api";
 import { PageHeader, Loading, StatusBadge, CodecChip, Readout } from "@/components/common";
 import Modal, { TextField, SelectField, PrimaryButton, GhostButton } from "@/components/Modal";
+import HlsPlayer from "@/components/HlsPlayer";
 import { toast } from "sonner";
-import { Plus, Trash2, Film, ListVideo, Clock, Eye } from "lucide-react";
+import { Plus, Trash2, Film, ListVideo, Clock, Eye, Play, Link2, Cloud, HardDrive } from "lucide-react";
 
 const dur = (s) => `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
 const fmt = (n) => (n >= 1000 ? (n / 1000).toFixed(1) + "K" : n);
@@ -12,13 +13,29 @@ export default function Media() {
   const [vod, setVod] = useState(null);
   const [playlists, setPlaylists] = useState([]);
   const [open, setOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [playing, setPlaying] = useState(null);
+  const [imp, setImp] = useState({ title: "", source_url: "", ladder: "720p", video_codec: "H.264", audio_codec: "AAC" });
   const [form, setForm] = useState({ title: "", duration_s: 3600, size_gb: 2.0, codec: "H.264 / AAC", resolution: "1080p", status: "ready" });
 
   const load = async () => {
     const [v, p] = await Promise.all([api.get("/vod"), api.get("/playlists")]);
     setVod(v.data); setPlaylists(p.data);
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    const id = setInterval(() => api.get("/vod").then((r) => setVod(r.data)), 5000);
+    return () => clearInterval(id);
+  }, []);
+
+  const doImport = async () => {
+    if (!imp.source_url) return toast.error("Enter a source URL");
+    try {
+      await api.post("/vod/import", imp);
+      toast.success("Import started — transcoding to HLS");
+      setImportOpen(false); setImp({ ...imp, title: "", source_url: "" }); load();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
 
   const create = async () => {
     try {
@@ -36,6 +53,9 @@ export default function Media() {
   return (
     <div className="space-y-6">
       <PageHeader title="VOD & Playout" subtitle="On-demand library, DVR archive and scheduled 24/7 playout loops.">
+        <GhostButton testid="import-vod-btn" onClick={() => setImportOpen(true)}>
+          <span className="flex items-center gap-1.5"><Link2 className="h-4 w-4" /> Import from URL</span>
+        </GhostButton>
         <PrimaryButton testid="new-vod-btn" onClick={() => setOpen(true)}>
           <span className="flex items-center gap-1.5"><Plus className="h-4 w-4" /> Add Asset</span>
         </PrimaryButton>
@@ -58,18 +78,23 @@ export default function Media() {
                   <tr key={v.id} data-testid={`vod-row-${v.id}`} className="border-t border-[#1E293B]/60 text-slate-300 hover:bg-[#1E293B]/30">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
-                        <Film className="h-4 w-4 text-sky-400" />
+                        {v.storage === "s3" ? <Cloud className="h-4 w-4 text-emerald-400" title="S3" /> : <Film className="h-4 w-4 text-sky-400" />}
                         <span className="font-medium text-slate-100">{v.title}</span>
                       </div>
-                      <span className="font-mono text-[11px] text-slate-500">{v.resolution}</span>
+                      <span className="font-mono text-[11px] text-slate-500">{v.resolution}{v.playable ? " · playable" : ""}</span>
                     </td>
                     <td className="px-4 py-3"><CodecChip>{v.codec}</CodecChip></td>
                     <td className="px-4 py-3 font-mono tabular text-slate-400"><Clock className="mr-1 inline h-3 w-3" />{dur(v.duration_s)}</td>
                     <td className="px-4 py-3 font-mono tabular text-slate-400">{v.size_gb} GB</td>
                     <td className="px-4 py-3 font-mono tabular text-slate-300"><Eye className="mr-1 inline h-3 w-3" />{fmt(v.views)}</td>
                     <td className="px-4 py-3"><StatusBadge status={v.status} /></td>
-                    <td className="px-4 py-3 text-right">
-                      <button data-testid={`delete-vod-${v.id}`} onClick={() => remove(v.id)} className="rounded-md p-1.5 text-red-400 hover:bg-red-500/10"><Trash2 className="h-4 w-4" /></button>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-1">
+                        {v.playable && v.status === "ready" && (
+                          <button data-testid={`play-vod-${v.id}`} onClick={() => setPlaying(v)} className="rounded-md p-1.5 text-emerald-400 hover:bg-emerald-500/10" title="Play"><Play className="h-4 w-4" /></button>
+                        )}
+                        <button data-testid={`delete-vod-${v.id}`} onClick={() => remove(v.id)} className="rounded-md p-1.5 text-red-400 hover:bg-red-500/10"><Trash2 className="h-4 w-4" /></button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -117,6 +142,21 @@ export default function Media() {
           <SelectField label="Resolution" testid="vod-res" value={form.resolution} onChange={(v) => setForm({ ...form, resolution: v })} options={["2160p", "1080p", "720p", "480p"]} />
           <SelectField label="Status" testid="vod-status" value={form.status} onChange={(v) => setForm({ ...form, status: v })} options={["ready", "transcoding"]} />
         </div>
+      </Modal>
+
+      <Modal open={importOpen} onClose={() => setImportOpen(false)} title="Import VOD from URL" subtitle="Transcode a remote file/stream into a playable HLS asset."
+        footer={<><GhostButton testid="cancel-import" onClick={() => setImportOpen(false)}>Cancel</GhostButton><PrimaryButton testid="do-import" onClick={doImport}>Start Import</PrimaryButton></>}>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="sm:col-span-2"><TextField label="Title" testid="imp-title" value={imp.title} onChange={(v) => setImp({ ...imp, title: v })} placeholder="My Movie" /></div>
+          <div className="sm:col-span-2"><TextField label="Source URL" testid="imp-url" value={imp.source_url} onChange={(v) => setImp({ ...imp, source_url: v })} placeholder="https://…/video.mp4 · https://…/index.m3u8" /></div>
+          <SelectField label="ABR Ladder" testid="imp-ladder" value={imp.ladder} onChange={(v) => setImp({ ...imp, ladder: v })} options={["1080p", "720p", "480p", "single"]} />
+          <SelectField label="Video Codec" testid="imp-video" value={imp.video_codec} onChange={(v) => setImp({ ...imp, video_codec: v })} options={["H.264", "H.265/HEVC", "AV1", "VP9"]} />
+        </div>
+        <p className="mt-3 font-mono text-[11px] text-slate-500">The asset shows as “transcoding” until FFmpeg finishes, then becomes playable.</p>
+      </Modal>
+
+      <Modal open={!!playing} onClose={() => setPlaying(null)} wide title={playing?.title} subtitle={`${playing?.resolution} · ${playing?.codec}`}>
+        {playing && <HlsPlayer src={`${playing.hls_url}?t=${playing.id}`} />}
       </Modal>
     </div>
   );

@@ -21,6 +21,7 @@ from auth import auth_router, get_current_user, require_role, seed_admin, hash_p
 from seed import seed_sample_data
 from simulate import live_metrics, series
 import engine
+import storage
 import capabilities as caps
 import psutil
 
@@ -249,25 +250,93 @@ class VodBody(BaseModel):
     views: int = 0
 
 
+def _enrich_vod(v: dict) -> dict:
+    v.pop("_id", None)
+    if v.get("playable") and v.get("storage") != "s3":
+        st = engine.vod_status(v["id"])
+        v["status"] = st["status"]
+        if not v.get("hls_url"):
+            v["hls_url"] = f"/api/vod-hls/{v['id']}/master.m3u8"
+    return v
+
+
 @api_router.get("/vod")
 async def list_vod(user: dict = Depends(get_current_user)):
-    return await db.vod.find({}, {"_id": 0}).to_list(500)
+    docs = await db.vod.find({}, {"_id": 0}).to_list(500)
+    return [_enrich_vod(d) for d in docs]
 
 
 @api_router.post("/vod")
 async def create_vod(body: VodBody, user: dict = Depends(require_role("admin", "operator"))):
-    doc = {"id": new_id(), "created_at": now_iso(), **body.model_dump()}
+    doc = {"id": new_id(), "created_at": now_iso(), "playable": False, **body.model_dump()}
     await db.vod.insert_one(doc)
     doc.pop("_id", None)
     return doc
 
 
+class VodImportBody(BaseModel):
+    title: str
+    source_url: str
+    ladder: str = "720p"
+    video_codec: str = "H.264"
+    audio_codec: str = "AAC"
+
+
+@api_router.post("/vod/import")
+async def import_vod(body: VodImportBody, user: dict = Depends(require_role("admin", "operator"))):
+    """Transcode a remote file/stream URL into a seekable, playable VOD-HLS asset."""
+    vid = new_id()
+    try:
+        engine.start_vod_transcode(vid, body.source_url, body.ladder, body.video_codec, body.audio_codec)
+    except Exception as e:
+        raise HTTPException(500, f"Transcode failed to start: {e}")
+    doc = {"id": vid, "created_at": now_iso(), "title": body.title, "duration_s": 0,
+           "size_gb": 0.0, "codec": f"{body.video_codec} / {body.audio_codec}",
+           "resolution": body.ladder, "status": "transcoding", "views": 0,
+           "playable": True, "storage": "local", "hls_url": f"/api/vod-hls/{vid}/master.m3u8",
+           "source": body.source_url}
+    await db.vod.insert_one(doc)
+    doc.pop("_id", None)
+    return _enrich_vod(doc)
+
+
 @api_router.delete("/vod/{vod_id}")
 async def delete_vod(vod_id: str, user: dict = Depends(require_role("admin", "operator"))):
+    import shutil as _sh
     res = await db.vod.delete_one({"id": vod_id})
     if res.deleted_count == 0:
         raise HTTPException(404, "Asset not found")
+    _sh.rmtree(engine.vod_dir(vod_id), ignore_errors=True)
     return {"ok": True}
+
+
+@api_router.post("/channels/{channel_id}/record")
+async def record_channel(channel_id: str, user: dict = Depends(require_role("admin", "operator"))):
+    """Capture the current DVR window of a live channel into a permanent, playable VOD."""
+    doc = await db.channels.find_one({"id": channel_id})
+    if not doc:
+        raise HTTPException(404, "Channel not found")
+    vid = new_id()
+    try:
+        meta = engine.record_channel_to_vod(channel_id, vid)
+    except Exception as e:
+        raise HTTPException(400, str(e))
+    vdoc = {"id": vid, "created_at": now_iso(), "title": f"{doc['name']} — Recording",
+            "duration_s": meta["duration_s"], "size_gb": meta["size_gb"],
+            "codec": f"{doc.get('video_codec','H.264')} / {doc.get('audio_codec','AAC')}",
+            "resolution": doc.get("ladder", "720p"), "status": "ready", "views": 0,
+            "playable": True, "storage": "local", "hls_url": f"/api/vod-hls/{vid}/master.m3u8"}
+    # optional S3 offload
+    s3cfg = await db.settings.find_one({"_id": "s3"})
+    if s3cfg and s3cfg.get("enabled"):
+        try:
+            url = storage.upload_dir(s3cfg, str(engine.vod_dir(vid)), f"vod/{vid}")
+            vdoc["storage"] = "s3"; vdoc["hls_url"] = url
+        except Exception as e:
+            logger.warning("S3 upload failed: %s", e)
+    await db.vod.insert_one(vdoc)
+    vdoc.pop("_id", None)
+    return _enrich_vod(vdoc)
 
 
 class PlaylistBody(BaseModel):
@@ -405,6 +474,7 @@ class ChannelBody(BaseModel):
     audio_codec: str = "AAC"
     hw: str = "auto"              # auto | CPU | NVENC | VAAPI | QSV
     push_url: str = ""            # optional RTMP/SRT push egress
+    dvr: bool = False             # keep full seekable window for DVR
     region: str = "EU-West"
 
 
@@ -477,7 +547,7 @@ async def start_channel(channel_id: str, user: dict = Depends(require_role("admi
         engine.start_channel(channel_id, doc.get("source", "test"), doc.get("source_url", ""),
                              int(doc.get("ingest_port", 9000)), doc.get("ladder", "720p"),
                              doc.get("video_codec", "H.264"), doc.get("audio_codec", "AAC"),
-                             doc.get("hw", "auto"), doc.get("push_url", ""))
+                             doc.get("hw", "auto"), doc.get("push_url", ""), bool(doc.get("dvr", False)))
     except Exception as e:
         raise HTTPException(500, f"Failed to start encoder: {e}")
     ready = await engine.wait_for_master(channel_id, timeout=25)
@@ -607,6 +677,47 @@ async def restart_engine(user: dict = Depends(require_role("admin"))):
     return {"ok": True, "stopped": n}
 
 
+# ---------- S3-compatible object storage ----------
+class StorageBody(BaseModel):
+    enabled: bool = False
+    endpoint_url: str = ""
+    region: str = "us-east-1"
+    bucket: str = ""
+    access_key: str = ""
+    secret_key: str = ""
+    public_base: str = ""
+
+
+@api_router.get("/system/storage")
+async def get_storage(user: dict = Depends(require_role("admin", "operator"))):
+    cfg = await db.settings.find_one({"_id": "s3"})
+    return storage.masked(cfg)
+
+
+@api_router.put("/system/storage")
+async def set_storage(body: StorageBody, user: dict = Depends(require_role("admin"))):
+    existing = await db.settings.find_one({"_id": "s3"}) or {}
+    data = body.model_dump()
+    # keep previously-saved secret if the UI submits the masked placeholder / blank
+    if not data["secret_key"] and existing.get("secret_key"):
+        data["secret_key"] = existing["secret_key"]
+    if data["access_key"].endswith("…") and existing.get("access_key"):
+        data["access_key"] = existing["access_key"]
+    await db.settings.update_one({"_id": "s3"}, {"$set": data}, upsert=True)
+    return storage.masked({**existing, **data})
+
+
+@api_router.post("/system/storage/test")
+async def test_storage(body: StorageBody, user: dict = Depends(require_role("admin"))):
+    existing = await db.settings.find_one({"_id": "s3"}) or {}
+    data = body.model_dump()
+    if not data["secret_key"]:
+        data["secret_key"] = existing.get("secret_key", "")
+    if data["access_key"].endswith("…"):
+        data["access_key"] = existing.get("access_key", "")
+    return storage.test_connection(data)
+
+
 # HLS delivery (public playback so the browser player can fetch segments)
 _MEDIA_TYPES = {".m3u8": "application/vnd.apple.mpegurl", ".ts": "video/mp2t",
                 ".m4s": "video/iso.segment", ".mp4": "video/mp4"}
@@ -624,6 +735,21 @@ async def serve_hls(channel_id: str, filename: str):
     headers = {"Access-Control-Allow-Origin": "*"}
     if ext == ".m3u8":
         headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return FileResponse(str(path), media_type=media, headers=headers)
+
+
+@app.get("/api/vod-hls/{vod_id}/{filename}")
+async def serve_vod_hls(vod_id: str, filename: str):
+    if ".." in filename or "/" in filename:
+        raise HTTPException(400, "Invalid path")
+    path = engine.vod_dir(vod_id) / filename
+    if not path.exists():
+        raise HTTPException(404, "Not found")
+    ext = path.suffix.lower()
+    media = _MEDIA_TYPES.get(ext, "application/octet-stream")
+    headers = {"Access-Control-Allow-Origin": "*"}
+    if ext == ".m3u8":
+        headers["Cache-Control"] = "no-cache"
     return FileResponse(str(path), media_type=media, headers=headers)
 
 
