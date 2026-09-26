@@ -118,11 +118,11 @@ def build_cmd(channel_id: str, source: str, source_url: str, ingest_port: int,
         rungs = LADDERS.get(ladder_key, LADDERS["720p"])
     rungs = [tuple(r) for r in rungs]
     try:
-        fps_f = float(fps) if fps else 50.0
+        fps_f = float(fps) if fps else 0.0
     except (ValueError, TypeError):
-        fps_f = 50.0
-    gop = max(2, round(fps_f * (keyframe_s or 2.0)))
-    fps_filter = f",fps={fps}" if fps else ""
+        fps_f = 0.0
+    gop = max(2, round((fps_f or 50.0) * (keyframe_s or 2.0)))
+    fps_filter = f",fps={fps}" if fps_f > 0 else ""
     venc, eff_hw = caps.resolve_encoder(video_codec, hw)
     aenc = caps.audio_encoder(audio_codec)
     in_args, audio_map, need_shortest = _input_args(source, source_url, ingest_port)

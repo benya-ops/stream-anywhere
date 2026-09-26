@@ -39,6 +39,19 @@ functionality + work with all codecs. Product name: **Stream Anywhere**.
 ## Environment limits (preview)
 - No GPU -> CPU only. Push-in listeners need open ports (enabled after deploy). Playwright Chromium lacks H.264 so automated video playback not verifiable (real browsers play). VOD_STORE/HLS on pod are ephemeral in preview; persistent docker volumes in deploy.
 
+## Implemented (2026-06) — additions
+- **Configurable presets (admin, DB-backed — nothing hardcoded):** new `Presets` page (admin only) + `settings.app_presets` doc. GET `/api/config/presets` (all logged-in), PUT (admin), POST `/api/config/presets/reset` (admin). Editable lists: frame_rates, resolutions, regions, protocols_out, ABR ladders (key->[[h,vkbps,akbps]]), defaults (fps/keyframe_s/hls_segment_s/ladder). These feed every dropdown in Streams/Engine.
+- **Frame rate everywhere + real conversion:** `fps` on StreamBody & ChannelBody (default "50"); ChannelBody also `keyframe_s`. engine.build_cmd/start_channel take fps/keyframe_s/segment_s/rungs; scale filter appends `,fps={fps}` (drops if non-numeric), GOP = round(fps*keyframe_s). Verified: channel with fps=25 from 30fps source starts live with fps filter in graph.
+- **Codecs auto-detected incl MPEG-2 (video) + MP2 (audio):** capabilities.available_video_codecs()/available_audio_codecs() filter by real FFmpeg encoders; `/api/codecs` + engine/status use them. NVENC/QSV/VAAPI still auto-detected.
+- **Edit existing resources:** pencil/Edit UI wired to PUT `/api/streams/{id}`, PUT `/api/channels/{id}` (new endpoint), PUT `/api/profiles/{id}` on Streams, Media Server, Transcoding pages.
+- **In-app Guide (RU) + downloadable:** `Guide` page (all logged-in), tabs Install&Maintenance / Admin / User, "Скачать .md" + "PDF / Печать" (printable window). Full server install + operations (docker ps/logs/backup/password change).
+- Seed defaults de-60p'd (p50/p25) incl an MPEG-2 Contribution profile.
+- Deploy fix (2026-06): added boto3/botocore to deploy/requirements.prod.txt (backend container was crash-looping with ModuleNotFoundError: boto3 → 502 on user's server).
+- Tested: iter8 100% backend (pytest test_presets_fps.py 10/10) + 100% frontend (Presets/fps/edit/guide flows).
+
+## Auth model note
+- canAccess: `guide` open to all logged-in; `presets` admin-only (not a grantable module).
+
 ## Backlog / next
 - P1: LL-HLS + simultaneous MPEG-DASH packaging.
 - P1: Multi-node clustering / load balancing.

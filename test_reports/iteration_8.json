@@ -1,0 +1,23 @@
+{
+  "summary": "Iteration 8: end-to-end verification of the new Presets/FPS/Guide + Edit features. Backend: 10/10 pytest passed (test_presets_fps.py) — presets GET/PUT/reset (8 default frame rates, defaults.fps='50'), codecs auto-detected include MPEG-2 video and MP2 audio, stream create+edit+delete persists fps/resolution, channel create+edit persists fps/keyframe_s, channel with fps=25 starts successfully (has_master=true), engine/status returns frame_rates+ladders, profile PUT works, RBAC: scoped user gets 403 on PUT/POST reset presets but 200 on GET. UI (Playwright, admin): Mission Control loads; Presets page — added fps chip '100', Save Presets → reload → chip persisted; Reset restored defaults (chip gone). Streams — Create modal exposes separate Resolution + Frame Rate (fps) selects; edit button (edit-btn-<id>) opens prefilled modal; changing to 720p+25fps → PUT persists and row shows '720p@25'. Media Server New Channel modal has ch-fps + ch-keyframe + ch-ladder. Transcoding — 4 edit-profile-<id> buttons; new profile default ladder is '1080p50@6M / 720p50@3M / 576p25@1.2M' (p50/p25, no 60p). Guide page renders with 3 tabs (install/admin/user) in Russian, Скачать .md + PDF/Печать buttons present. All test data cleaned up.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_presets_fps.py",
+    "/app/test_reports/pytest/pytest_presets_fps.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Presets.jsx LadderEditor textarea uses defaultValue + onBlur only. If a user edits a ladder rung and clicks Save Presets before the textarea loses focus, the change won't be captured. Consider using value+onChange, or force blur() on Save.",
+    "Streams.jsx openCreate uses presets.resolutions[0] as default resolution (first item wins). Would be more predictable to add a defaults.resolution to presets rather than picking [0].",
+    "Guide.jsx builds the printable HTML with a simple esc() that handles & and <, but code:pre blocks receive the same escaping — acceptable but note user-typed content isn't involved here, so xss risk is low.",
+    "engine.build_cmd concatenates ',fps={fps}' to the scale filter; ensure fps is validated numeric (currently comes from a curated presets list which is fine, but PUT /api/config/presets accepts arbitrary strings — invalid entries like 'abc' would only fail at start_channel time)."
+  ],
+  "updated_files": ["/app/backend/tests/test_presets_fps.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "admin@streamanywhere.io / Broadcast2026! (from /app/memory/test_credentials.md). Ad-hoc TEST_scoped@test.io created and deleted during RBAC test.",
+  "seed_data_creation": "None persisted. All test streams, channels, profiles, users created during tests are deleted at end. Presets were reset to factory defaults after mutation test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Presets/fps/guide/edit features fully verified end-to-end. Regression test file: /app/backend/tests/test_presets_fps.py. If new preset keys are added (e.g. defaults.resolution), extend TestPresets. UI selectors are stable: nav-presets, presets-page, chip-add-fps, chip-input-fps, chip-remove-fps-<val>, save-presets, reset-presets, ladder-editor, field-fps, field-res, edit-btn-<id>, save-stream, ch-fps, ch-keyframe, ch-ladder, edit-channel-btn, save-channel, edit-profile-<id>, save-profile, guide-tab-install/admin/user, guide-download, guide-print."
+}

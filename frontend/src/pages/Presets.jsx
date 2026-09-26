@@ -8,10 +8,11 @@ import { Plus, X, Save, RotateCcw, ListChecks } from "lucide-react";
 export default function Presets() {
   const [cfg, setCfg] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [rev, setRev] = useState(0);
 
   const load = async () => {
     const { data } = await api.get("/config/presets");
-    setCfg(data);
+    setCfg(data); setRev((r) => r + 1);
   };
   useEffect(() => { load(); }, []);
 
@@ -35,7 +36,7 @@ export default function Presets() {
 
   const reset = async () => {
     if (!window.confirm("Reset all presets back to factory defaults?")) return;
-    try { const { data } = await api.post("/config/presets/reset"); setCfg(data); toast.success("Presets reset to defaults"); }
+    try { const { data } = await api.post("/config/presets/reset"); setCfg(data); setRev((r) => r + 1); toast.success("Presets reset to defaults"); }
     catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
@@ -60,7 +61,7 @@ export default function Presets() {
         <ChipCard title="Delivery protocols" testid="proto" items={cfg.protocols_out} onChange={(v) => setKey("protocols_out", v)} placeholder="e.g. HLS" />
       </div>
 
-      <LadderEditor ladders={cfg.ladders} onChange={(v) => setKey("ladders", v)} />
+      <LadderEditor key={rev} ladders={cfg.ladders} onChange={(v) => setKey("ladders", v)} />
 
       <div className="rounded-lg border border-[#1E293B] bg-[#0F172A]/80 p-5">
         <div className="mb-4 flex items-center gap-2"><ListChecks className="h-4 w-4 text-sky-400" /><h3 className="font-mono text-xs uppercase tracking-widest text-slate-400">Defaults for new streams & channels</h3></div>
@@ -113,10 +114,28 @@ function LadderEditor({ ladders, onChange }) {
   const toText = (rows) => (rows || []).map((r) => r.join(",")).join("\n");
   const fromText = (t) => t.split("\n").map((l) => l.split(",").map((s) => s.trim())).filter((r) => r.length >= 3);
 
-  const updateRows = (key, text) => onChange({ ...ladders, [key]: fromText(text) });
+  const [texts, setTexts] = useState(() =>
+    Object.fromEntries(Object.entries(ladders || {}).map(([k, rows]) => [k, toText(rows)])));
+
+  // resync when ladder keys change externally (e.g. after Reset or add/remove)
+  useEffect(() => {
+    setTexts((prev) => {
+      const next = {};
+      Object.entries(ladders || {}).forEach(([k, rows]) => {
+        next[k] = k in prev ? prev[k] : toText(rows);
+      });
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [Object.keys(ladders || {}).join("|")]);
+
+  const editRows = (key, text) => {
+    setTexts((p) => ({ ...p, [key]: text }));
+    onChange({ ...ladders, [key]: fromText(text) });
+  };
   const addLadder = () => {
     const k = newKey.trim();
-    if (k && !ladders[k]) onChange({ ...ladders, [k]: [[720, 3000, 128]] });
+    if (k && !ladders[k]) { onChange({ ...ladders, [k]: [[720, 3000, 128]] }); }
     setNewKey("");
   };
   const removeLadder = (key) => {
@@ -134,13 +153,13 @@ function LadderEditor({ ladders, onChange }) {
         </div>
       </div>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {Object.entries(ladders || {}).map(([key, rows]) => (
+        {Object.keys(ladders || {}).map((key) => (
           <div key={key} className="rounded-lg border border-[#1E293B] bg-slate-950/40 p-3" data-testid={`ladder-${key}`}>
             <div className="mb-2 flex items-center justify-between">
               <span className="font-mono text-sm font-semibold text-sky-300">{key}</span>
               <button data-testid={`ladder-remove-${key}`} onClick={() => removeLadder(key)} className="rounded-md p-1 text-red-400 hover:bg-red-500/10"><X className="h-4 w-4" /></button>
             </div>
-            <textarea data-testid={`ladder-text-${key}`} defaultValue={toText(rows)} onBlur={(e) => updateRows(key, e.target.value)} rows={4}
+            <textarea data-testid={`ladder-text-${key}`} value={texts[key] ?? ""} onChange={(e) => editRows(key, e.target.value)} rows={4}
               className="w-full rounded-lg border border-[#1E293B] bg-slate-950/60 px-3 py-2 font-mono text-xs text-slate-100 outline-none focus:border-sky-500/50" />
           </div>
         ))}
