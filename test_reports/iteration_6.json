@@ -1,0 +1,34 @@
+{
+  "summary": "Verified single super-admin auth model and per-module RBAC on backend + frontend. 10/10 backend pytest cases pass covering admin login, removal of self-register/forgot/reset endpoints (404), /api/modules, scoped user creation, permission enforcement across read+write on allowed and denied modules, admin-role auto-permissioning, permission edit taking effect, and super-admin protection (delete=400, demote no-op). Frontend: login page shows single Sign in form (no register tab), super admin sees all 10 nav items including Access Control & System, scoped user (engine+media) sees only Mission Control + Media Server + VOD & Playout + Settings, direct navigation to /streams and /system correctly redirects to /. Access Control UI: superadmin row shows crown and hides edit/delete; scoped users have edit-user-<id>/delete-user-<id>. Only super admin remains after cleanup.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Global axios error handling", "issue": "When a scoped user lands on Mission Control (or any page) some components fire API calls to modules they don't have (e.g. /streams). Backend correctly returns 403, but the frontend surfaces this as an 'Unhandled rejection · A background operation failed · Request failed with status code 403' overlay (Emergent dev overlay + likely a real unhandled promise). Data tables in Mission Control were empty because of these rejections. Consider swallowing 403 from cross-module fetches or gating the fetch on canAccess().", "selector": "n/a", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [
+      {"flow": "Create user via UI then list refresh", "issue": "After clicking save-user the new row was not immediately visible in users-table on first read (POST succeeded — user could log in successfully). Likely a race between modal close animation and load() re-fetch. Add await on the POST->load() chain or key the table off state.", "affected_selectors": ["users-table"]}
+    ],
+    "design_issues": [
+      {"screen": "Various pages", "issues": ["Recharts warning: 'The width(-1) and height(-1) of chart should be greater than 0' — container has no explicit minHeight/minWidth; harmless but noisy in console."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_auth_rbac.py", "/app/test_reports/pytest/pytest_auth_rbac.xml"],
+  "action_items": [
+    "Suppress/handle 403 responses from module-scoped GETs when initiated by pages the user has access to but which prefetch cross-module data. Prefer gating the axios call with canAccess(user, module) or catching 403 without rethrowing so no Unhandled rejection overlay appears.",
+    "Ensure Users.jsx doCreate awaits load() (already does) — investigate why newly-created user was not in the immediate DOM read; may just be timing but worth verifying with a small wait or refetch on modal close.",
+    "Optional: give Recharts containers explicit minHeight to silence warnings."
+  ],
+  "critical_code_review_comments": [
+    "auth.py create_access_token still defaults role to 'viewer' when seeding tokens — legacy role name. Not harmful because require_role/require_module check DB values, but cleanup is recommended.",
+    "server.py update_user allows body.role='admin' upgrade for a non-superadmin user; this is intentional per requirements. Just noting — currently any admin can promote any non-superadmin to admin.",
+    "Frontend AppLayout uses canAccess for nav filtering and <Protected> guards routes — good. However components fetching data (e.g. Overview) do not check canAccess before fetching foreign modules, producing 403 noise + toast/overlay for scoped users."
+  ],
+  "updated_files": ["/app/backend/tests/test_auth_rbac.py"],
+  "success_rate": {"backend": "100%", "frontend": "90%"},
+  "test_credentials": "admin@streamanywhere.io / Broadcast2026! (super admin, seeded on startup). All ad-hoc test users cleaned up at end of run.",
+  "seed_data_creation": "None persisted — all created users/channels were deleted post-run. Only super admin remains.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend RBAC + auth is solid. If frontend prefetch-403 overlay is fixed, verify scoped user's Mission Control loads cleanly without Unhandled rejection dialog. Use test_auth_rbac.py as regression suite for auth/RBAC.",
+  "rca of the issue": "N/A — no critical bugs. Only a minor UX rough edge where scoped users see a 403 overlay because the app makes API calls to modules they don't have access to. Reproduction: create scoped user with only engine+media perms, log in as that user, land on Mission Control; the app calls (e.g.) /api/streams which returns 403 and produces an Unhandled promise rejection surfaced as an Emergent overlay. Mitigation: guard axios calls with canAccess(user, module) or catch 403 silently for cross-module prefetches."
+}

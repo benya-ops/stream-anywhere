@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import api from "@/lib/api";
+import { useAuth, canAccess } from "@/context/AuthContext";
 import { StatCard, PageHeader, Loading, StatusBadge, Readout } from "@/components/common";
 import StreamPreview from "@/components/StreamPreview";
 import { Radio, Users2, ArrowUpFromLine, ArrowDownToLine, Cpu, Activity } from "lucide-react";
@@ -8,30 +9,41 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 const fmt = (n) => (n >= 1000 ? (n / 1000).toFixed(1) + "K" : n);
 
 export default function Overview() {
+  const { user } = useAuth();
   const [ov, setOv] = useState(null);
   const [an, setAn] = useState(null);
   const [streams, setStreams] = useState([]);
 
+  const canAnalytics = canAccess(user, "analytics");
+  const canStreams = canAccess(user, "streams");
+
   const load = async () => {
-    const [o, a, s] = await Promise.all([
-      api.get("/overview"), api.get("/analytics?range=1h"), api.get("/streams"),
-    ]);
-    setOv(o.data); setAn(a.data); setStreams(s.data);
+    try {
+      const o = await api.get("/overview");
+      setOv(o.data);
+    } catch (e) { /* overview is always allowed */ }
+    if (canAnalytics) {
+      try { const a = await api.get("/analytics?range=1h"); setAn(a.data); } catch (e) { /* ignore */ }
+    }
+    if (canStreams) {
+      try { const s = await api.get("/streams"); setStreams(s.data); } catch (e) { /* ignore */ }
+    }
   };
 
   useEffect(() => {
     load();
     const id = setInterval(load, 5000);
     return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!ov || !an) return <Loading />;
+  if (!ov) return <Loading />;
 
-  const chartData = an.egress.map((p, i) => ({
+  const chartData = an ? an.egress.map((p, i) => ({
     t: new Date(p.t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     egress: p.v,
     viewers: Math.round((an.viewers[i]?.v || 0) / 20),
-  }));
+  })) : [];
 
   const live = streams.filter((s) => s.status === "live");
 
@@ -40,13 +52,14 @@ export default function Overview() {
       <PageHeader title="Mission Control" subtitle="Real-time overview of all broadcast operations across edge nodes." />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard testid="stat-live" label="Live Channels" value={ov.live_count} unit={`/ ${ov.total_streams}`} icon={Radio} accent="emerald" spark={an.ingest} />
-        <StatCard testid="stat-viewers" label="Concurrent Viewers" value={fmt(ov.total_viewers)} icon={Users2} accent="indigo" spark={an.viewers} />
-        <StatCard testid="stat-egress" label="Egress Bandwidth" value={ov.egress_mbps} unit="Mbps" icon={ArrowUpFromLine} accent="sky" spark={an.egress} />
-        <StatCard testid="stat-ingest" label="Ingest Bandwidth" value={ov.ingest_mbps} unit="Mbps" icon={ArrowDownToLine} accent="violet" spark={an.ingest} />
+        <StatCard testid="stat-live" label="Live Channels" value={ov.live_count} unit={`/ ${ov.total_streams}`} icon={Radio} accent="emerald" spark={an?.ingest} />
+        <StatCard testid="stat-viewers" label="Concurrent Viewers" value={fmt(ov.total_viewers)} icon={Users2} accent="indigo" spark={an?.viewers} />
+        <StatCard testid="stat-egress" label="Egress Bandwidth" value={ov.egress_mbps} unit="Mbps" icon={ArrowUpFromLine} accent="sky" spark={an?.egress} />
+        <StatCard testid="stat-ingest" label="Ingest Bandwidth" value={ov.ingest_mbps} unit="Mbps" icon={ArrowDownToLine} accent="violet" spark={an?.ingest} />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        {an && (
         <div className="lg:col-span-2 rounded-lg border border-[#1E293B] bg-[#0F172A]/80 p-5">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="font-mono text-xs uppercase tracking-widest text-slate-400">Bandwidth · Viewers (last hour)</h3>
@@ -76,6 +89,7 @@ export default function Overview() {
             </ResponsiveContainer>
           </div>
         </div>
+        )}
 
         <div className="rounded-lg border border-[#1E293B] bg-[#0F172A]/80 p-5">
           <div className="mb-4 flex items-center justify-between">
@@ -99,6 +113,7 @@ export default function Overview() {
         </div>
       </div>
 
+      {canStreams && (
       <div>
         <div className="mb-3 flex items-center justify-between">
           <h3 className="font-mono text-xs uppercase tracking-widest text-slate-400">Live Preview Wall</h3>
@@ -118,6 +133,7 @@ export default function Overview() {
           ))}
         </div>
       </div>
+      )}
     </div>
   );
 }
