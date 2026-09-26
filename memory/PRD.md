@@ -17,6 +17,15 @@ functionality + work with all codecs. Product name: **Stream Anywhere**.
 - Admin: manage users, access control, all resources.
 - Viewer: read-only monitoring.
 
+## Auth model (updated)
+- SINGLE super-admin, seeded from env (ADMIN_EMAIL/ADMIN_PASSWORD), re-synced on every startup.
+- NO self-registration / NO email reset (endpoints removed). Login only.
+- Super admin creates users in Access Control and grants per-module access.
+- Roles: `admin` (full + user mgmt) or `user` (module-scoped via `permissions`).
+- Modules: engine, streams, sources, transcoding, media, analytics, system. Overview open to all; users mgmt admin-only.
+- Enforced backend (require_module) + frontend (canAccess nav/route guards + Overview gated fetches).
+- Deploy fix: /app/.dockerignore excludes backend/.env; docker-compose passes admin creds explicitly so the installer-generated password always works.
+
 ## Implemented (2026-06)
 - Auth + RBAC (admin/operator/viewer); Mission Control, Streams (sim), Sources, Transcoding, Analytics, Access Control, Settings.
 - REAL Media Server (/engine): FFmpeg transcode -> live HLS ABR (hls.js playback). Sources: test/bars/URL-pull/SRT+RTMP listeners. HW auto/CPU/NVENC/VAAPI/QSV. Optional RTMP/SRT push egress. Inline QC (black/freeze/stalled). Audio-less sources auto-get a silent track.

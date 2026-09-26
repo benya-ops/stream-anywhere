@@ -1,0 +1,31 @@
+{
+  "summary": "Verified the Mission Control 403-overlay fix for scoped users. Overview.jsx now gates /analytics and /streams fetches with canAccess() and try/catch; bandwidth chart and Live Preview Wall are conditionally rendered. All scenarios from the request PASS: (1) scoped user [engine,media] lands on Mission Control with NO Unhandled rejection / 403 overlay - 4 stat cards render, bandwidth chart HIDDEN, Edge Node Health renders, Live Preview Wall HIDDEN, 0 console error/unhandled entries, 0 pageerror events. (2) scoped user [analytics] shows bandwidth chart, hides Live Preview Wall, no overlay. (3) Nav gating correct: scoped user sees only Mission Control, Media Server, VOD & Playout, Settings; direct nav to /streams, /analytics, /users, /system all redirect to /. (4) Super admin sees all 10 nav items and full dashboard with no errors. (5) Backend RBAC spot-checks: POST /api/auth/register -> 404, eng GET /channels -> 200, /streams -> 403, /system/stats -> 403; DELETE super-admin -> 403 (blocked, though request spec expected 400). (6) Access Control UI create/edit works; super admin row shows crown and hides edit/delete buttons. All test users cleaned up; only super admin remains.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "DELETE /api/users/{superadmin_id}", "issue": "Returns 403 instead of the 400 mentioned in the review request. Behaviourally correct (super admin cannot be deleted), just a status-code mismatch with expectations."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_auth_rbac.py", "/app/test_reports/pytest/pytest_auth_rbac.xml"],
+  "action_items": [
+    "(Optional) Change DELETE /api/users/{superadmin} response from 403 to 400 to match spec, or update spec to 403."
+  ],
+  "critical_code_review_comments": [
+    "Overview.jsx correctly gates cross-module fetches with canAccess and wraps in try/catch - no more unhandled rejections.",
+    "Other pages (Analytics, Streams, System, Users) are already <Protected> so a scoped user cannot land on them, but any future page that prefetches multi-module data should follow the same canAccess-guard pattern used in Overview.jsx.",
+    "Consider a global axios interceptor to swallow 403s silently for background/periodic polling to make future additions safer."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "admin@streamanywhere.io / Broadcast2026! (super admin). Test users eng@test.io & an@test.io & uitest@test.io created and deleted during run.",
+  "seed_data_creation": "None persisted. All ad-hoc test users deleted at end of run; final /api/users returns only [('admin@streamanywhere.io', True)].",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "The Mission Control 403-overlay bug is fixed. RBAC + auth model is stable. If new pages are added that read multiple modules, follow Overview.jsx pattern (canAccess gate + try/catch). Regression test file: /app/backend/tests/test_auth_rbac.py.",
+  "rca of the issue": "Original bug: scoped user landing on Mission Control saw Emergent 'Unhandled rejection · A background operation failed · status code 403' overlay because Overview.jsx always fetched /streams and /analytics regardless of permissions, and rejected promises weren't caught. Fix: gate each fetch behind canAccess(user, module) and swallow errors in try/catch; render bandwidth chart only if {an} is present and preview wall only if {canStreams}. Verified with two scoped users - no overlay, no console errors, correct UI degradation."
+}
