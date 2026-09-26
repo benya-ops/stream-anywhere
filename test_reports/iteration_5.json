@@ -1,0 +1,28 @@
+{
+  "summary": "Verified env-driven admin password re-sync (seed_admin) that underlies the deployment login fix. Baseline login, temporary password swap + restart, restore, brute-force resilience, and deploy static checks all pass. System restored to Broadcast2026!.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_results": {
+    "baseline_login": "PASS - POST /api/auth/login returns 200 with role=admin; GET /api/auth/me with Bearer returns admin user",
+    "env_resync_new_password": "PASS - After setting ADMIN_PASSWORD=TmpPass_9f3k and restarting backend, login with TmpPass_9f3k -> 200",
+    "env_resync_old_password_rejected": "PASS - After resync, login with old Broadcast2026! -> 401 (Invalid email or password)",
+    "restore": "PASS - Reset ADMIN_PASSWORD to Broadcast2026!, restart, login -> 200 role=admin",
+    "brute_force_not_permanent": "PASS - 3 wrong attempts followed by correct password -> 200 (lockout is per-identifier and temporary, MAX_ATTEMPTS=5)",
+    "dockerignore_check": "PASS - /app/.dockerignore contains backend/.env (and **/.env)",
+    "docker_compose_check": "PASS - deploy/docker-compose.yml is valid YAML; backend service environment interpolates ADMIN_EMAIL, ADMIN_PASSWORD, JWT_SECRET, DB_NAME, CORS_ORIGINS from ${...}"
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "seed_admin in /app/backend/auth.py correctly updates existing admin password_hash when env password does not verify against stored hash — this is exactly the mechanism that makes the installer-generated ADMIN_PASSWORD authoritative on user servers.",
+    "docker-compose sets CORS_ORIGINS default to '*' which combined with credentialed cookies (samesite=none, secure) may be problematic in browsers; consider requiring explicit origins in production. Not blocking for this task."
+  ],
+  "updated_files": ["/app/backend/.env (toggled during test, restored to Broadcast2026!)"],
+  "success_rate": {"backend": "100%", "frontend": "n/a"},
+  "test_credentials": "admin@streamanywhere.io / Broadcast2026! (restored)",
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "ADMIN_PASSWORD is restored to Broadcast2026! in /app/backend/.env and backend restarted. seed_admin re-syncs the admin password on every startup from env, so any change to ADMIN_PASSWORD is picked up after `sudo supervisorctl restart backend`.",
+  "rca of the issue": "In the user's on-server deployment, a baked backend/.env (with the demo password) was overriding the installer-generated ADMIN_PASSWORD injected by docker-compose environment. Fixed by (1) /app/.dockerignore excluding backend/.env from the image, and (2) deploy/docker-compose.yml explicitly interpolating ADMIN_EMAIL/ADMIN_PASSWORD/JWT_SECRET/DB_NAME/CORS_ORIGINS via ${...}, making the container env authoritative. seed_admin then re-syncs the admin password_hash on startup to whatever ADMIN_PASSWORD is set to. Verified end-to-end in preview."
+}
