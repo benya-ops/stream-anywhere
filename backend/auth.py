@@ -68,7 +68,8 @@ def _public_user(user: dict) -> dict:
         "id": str(user["_id"]),
         "email": user["email"],
         "name": user.get("name", ""),
-        "role": user.get("role", "viewer"),
+        "role": user.get("role", "user"),
+        "permissions": user.get("permissions", []),
         "created_at": user.get("created_at"),
     }
 
@@ -105,24 +106,9 @@ def require_role(*roles):
 
 
 # ---------- schemas ----------
-class RegisterBody(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=6)
-    name: str = Field(default="", max_length=80)
-
-
 class LoginBody(BaseModel):
     email: EmailStr
     password: str
-
-
-class ForgotBody(BaseModel):
-    email: EmailStr
-
-
-class ResetBody(BaseModel):
-    token: str
-    password: str = Field(min_length=6)
 
 
 # ---------- brute force ----------
@@ -151,27 +137,6 @@ async def _clear_attempts(identifier: str):
 
 
 # ---------- endpoints ----------
-@auth_router.post("/register")
-async def register(body: RegisterBody, response: Response):
-    email = body.email.lower()
-    if await db.users.find_one({"email": email}):
-        raise HTTPException(status_code=400, detail="Email already registered")
-    doc = {
-        "email": email,
-        "password_hash": hash_password(body.password),
-        "name": body.name or email.split("@")[0],
-        "role": "operator",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    result = await db.users.insert_one(doc)
-    doc["_id"] = result.inserted_id
-    uid = str(result.inserted_id)
-    access = create_access_token(uid, email, doc["role"])
-    refresh = create_refresh_token(uid)
-    _set_cookies(response, access, refresh)
-    return {"user": _public_user(doc), "access_token": access}
-
-
 @auth_router.post("/login")
 async def login(body: LoginBody, request: Request, response: Response):
     email = body.email.lower()
@@ -223,37 +188,9 @@ async def refresh(request: Request, response: Response):
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
 
-@auth_router.post("/forgot-password")
-async def forgot_password(body: ForgotBody):
-    email = body.email.lower()
-    user = await db.users.find_one({"email": email})
-    if user:
-        token = secrets.token_urlsafe(32)
-        await db.password_reset_tokens.insert_one({
-            "token": token,
-            "user_id": str(user["_id"]),
-            "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "used": False,
-        })
-        print(f"[PASSWORD RESET] link: /reset-password?token={token}")
-    return {"ok": True, "message": "If the account exists, a reset link was generated."}
-
-
-@auth_router.post("/reset-password")
-async def reset_password(body: ResetBody):
-    rec = await db.password_reset_tokens.find_one({"token": body.token})
-    if not rec or rec.get("used"):
-        raise HTTPException(status_code=400, detail="Invalid or used token")
-    if datetime.now(timezone.utc) > datetime.fromisoformat(rec["expires_at"]):
-        raise HTTPException(status_code=400, detail="Token expired")
-    await db.users.update_one({"_id": ObjectId(rec["user_id"])},
-                              {"$set": {"password_hash": hash_password(body.password)}})
-    await db.password_reset_tokens.update_one({"token": body.token}, {"$set": {"used": True}})
-    return {"ok": True}
-
-
 # ---------- seeding ----------
 async def seed_admin():
+    """Seed / re-sync the single super-admin from environment. Runs on every startup."""
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@streamanywhere.io").lower()
     admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")
     existing = await db.users.find_one({"email": admin_email})
@@ -261,10 +198,14 @@ async def seed_admin():
         await db.users.insert_one({
             "email": admin_email,
             "password_hash": hash_password(admin_password),
-            "name": "Administrator",
+            "name": "Super Admin",
             "role": "admin",
+            "superadmin": True,
+            "permissions": [],
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
-    elif not verify_password(admin_password, existing["password_hash"]):
-        await db.users.update_one({"email": admin_email},
-                                  {"$set": {"password_hash": hash_password(admin_password)}})
+    else:
+        update = {"role": "admin", "superadmin": True}
+        if not verify_password(admin_password, existing["password_hash"]):
+            update["password_hash"] = hash_password(admin_password)
+        await db.users.update_one({"email": admin_email}, {"$set": update})

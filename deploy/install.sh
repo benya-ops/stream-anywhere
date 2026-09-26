@@ -50,7 +50,7 @@ ENV_FILE="$SCRIPT_DIR/.env"
 if [ ! -f "$ENV_FILE" ]; then
     say "Generating deploy/.env …"
     JWT="$(openssl rand -hex 32 2>/dev/null || head -c32 /dev/urandom | xxd -p | tr -d '\n')"
-    ADMPASS="$(openssl rand -base64 12 2>/dev/null | tr -d '/+=' | cut -c1-14 || echo Broadcast$RANDOM!)"
+    ADMPASS="$(openssl rand -hex 8 2>/dev/null || echo change-me-$RANDOM)"   # unambiguous hex, no O/0/l confusion
     CPUS="$(nproc)"; [ "$CPUS" -gt 2 ] && CPUS=$((CPUS - 1))          # leave 1 core for the OS
     MEM_KB="$(grep MemTotal /proc/meminfo | awk '{print $2}')"
     MEM_G=$(( MEM_KB / 1024 / 1024 )); [ "$MEM_G" -gt 2 ] && MEM_G=$((MEM_G - 1)); [ "$MEM_G" -lt 1 ] && MEM_G=1

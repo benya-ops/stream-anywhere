@@ -40,6 +40,20 @@ def new_id():
     return str(uuid.uuid4())
 
 
+# Modules a non-admin user can be granted access to (super-admin has all)
+MODULES = ["engine", "streams", "sources", "transcoding", "media", "analytics", "system"]
+
+
+def require_module(mod: str):
+    async def _checker(user: dict = Depends(get_current_user)):
+        if user.get("role") == "admin":
+            return user
+        if mod in (user.get("permissions") or []):
+            return user
+        raise HTTPException(status_code=403, detail=f"No access to '{mod}'")
+    return _checker
+
+
 # =====================================================================
 # Health
 # =====================================================================
@@ -74,13 +88,13 @@ def enrich_stream(s: dict) -> dict:
 
 
 @api_router.get("/streams")
-async def list_streams(user: dict = Depends(get_current_user)):
+async def list_streams(user: dict = Depends(require_module("streams"))):
     docs = await db.streams.find({}, {"_id": 0}).to_list(500)
     return [enrich_stream(d) for d in docs]
 
 
 @api_router.get("/streams/{stream_id}")
-async def get_stream(stream_id: str, user: dict = Depends(get_current_user)):
+async def get_stream(stream_id: str, user: dict = Depends(require_module("streams"))):
     doc = await db.streams.find_one({"id": stream_id}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Stream not found")
@@ -93,7 +107,7 @@ async def get_stream(stream_id: str, user: dict = Depends(get_current_user)):
 
 
 @api_router.post("/streams")
-async def create_stream(body: StreamBody, user: dict = Depends(require_role("admin", "operator"))):
+async def create_stream(body: StreamBody, user: dict = Depends(require_module("streams"))):
     doc = {"id": new_id(), "created_at": now_iso(), "status": "standby",
            "stream_key": uuid.uuid4().hex[:20], **body.model_dump()}
     await db.streams.insert_one(doc)
@@ -102,7 +116,7 @@ async def create_stream(body: StreamBody, user: dict = Depends(require_role("adm
 
 @api_router.put("/streams/{stream_id}")
 async def update_stream(stream_id: str, body: StreamBody,
-                        user: dict = Depends(require_role("admin", "operator"))):
+                        user: dict = Depends(require_module("streams"))):
     res = await db.streams.update_one({"id": stream_id}, {"$set": body.model_dump()})
     if res.matched_count == 0:
         raise HTTPException(404, "Stream not found")
@@ -116,7 +130,7 @@ class ActionBody(BaseModel):
 
 @api_router.post("/streams/{stream_id}/action")
 async def stream_action(stream_id: str, body: ActionBody,
-                        user: dict = Depends(require_role("admin", "operator"))):
+                        user: dict = Depends(require_module("streams"))):
     doc = await db.streams.find_one({"id": stream_id})
     if not doc:
         raise HTTPException(404, "Stream not found")
@@ -132,7 +146,7 @@ async def stream_action(stream_id: str, body: ActionBody,
 
 
 @api_router.delete("/streams/{stream_id}")
-async def delete_stream(stream_id: str, user: dict = Depends(require_role("admin", "operator"))):
+async def delete_stream(stream_id: str, user: dict = Depends(require_module("streams"))):
     res = await db.streams.delete_one({"id": stream_id})
     if res.deleted_count == 0:
         raise HTTPException(404, "Stream not found")
@@ -153,12 +167,12 @@ class SourceBody(BaseModel):
 
 
 @api_router.get("/sources")
-async def list_sources(user: dict = Depends(get_current_user)):
+async def list_sources(user: dict = Depends(require_module("sources"))):
     return await db.sources.find({}, {"_id": 0}).to_list(500)
 
 
 @api_router.post("/sources")
-async def create_source(body: SourceBody, user: dict = Depends(require_role("admin", "operator"))):
+async def create_source(body: SourceBody, user: dict = Depends(require_module("sources"))):
     doc = {"id": new_id(), "created_at": now_iso(), **body.model_dump()}
     await db.sources.insert_one(doc)
     doc.pop("_id", None)
@@ -167,7 +181,7 @@ async def create_source(body: SourceBody, user: dict = Depends(require_role("adm
 
 @api_router.put("/sources/{source_id}")
 async def update_source(source_id: str, body: SourceBody,
-                        user: dict = Depends(require_role("admin", "operator"))):
+                        user: dict = Depends(require_module("sources"))):
     res = await db.sources.update_one({"id": source_id}, {"$set": body.model_dump()})
     if res.matched_count == 0:
         raise HTTPException(404, "Source not found")
@@ -175,7 +189,7 @@ async def update_source(source_id: str, body: SourceBody,
 
 
 @api_router.delete("/sources/{source_id}")
-async def delete_source(source_id: str, user: dict = Depends(require_role("admin", "operator"))):
+async def delete_source(source_id: str, user: dict = Depends(require_module("sources"))):
     res = await db.sources.delete_one({"id": source_id})
     if res.deleted_count == 0:
         raise HTTPException(404, "Source not found")
@@ -196,12 +210,12 @@ class ProfileBody(BaseModel):
 
 
 @api_router.get("/profiles")
-async def list_profiles(user: dict = Depends(get_current_user)):
+async def list_profiles(user: dict = Depends(require_module("transcoding"))):
     return await db.profiles.find({}, {"_id": 0}).to_list(500)
 
 
 @api_router.post("/profiles")
-async def create_profile(body: ProfileBody, user: dict = Depends(require_role("admin", "operator"))):
+async def create_profile(body: ProfileBody, user: dict = Depends(require_module("transcoding"))):
     doc = {"id": new_id(), "created_at": now_iso(), **body.model_dump()}
     await db.profiles.insert_one(doc)
     doc.pop("_id", None)
@@ -210,7 +224,7 @@ async def create_profile(body: ProfileBody, user: dict = Depends(require_role("a
 
 @api_router.put("/profiles/{profile_id}")
 async def update_profile(profile_id: str, body: ProfileBody,
-                         user: dict = Depends(require_role("admin", "operator"))):
+                         user: dict = Depends(require_module("transcoding"))):
     res = await db.profiles.update_one({"id": profile_id}, {"$set": body.model_dump()})
     if res.matched_count == 0:
         raise HTTPException(404, "Profile not found")
@@ -218,7 +232,7 @@ async def update_profile(profile_id: str, body: ProfileBody,
 
 
 @api_router.delete("/profiles/{profile_id}")
-async def delete_profile(profile_id: str, user: dict = Depends(require_role("admin", "operator"))):
+async def delete_profile(profile_id: str, user: dict = Depends(require_module("transcoding"))):
     res = await db.profiles.delete_one({"id": profile_id})
     if res.deleted_count == 0:
         raise HTTPException(404, "Profile not found")
@@ -261,13 +275,13 @@ def _enrich_vod(v: dict) -> dict:
 
 
 @api_router.get("/vod")
-async def list_vod(user: dict = Depends(get_current_user)):
+async def list_vod(user: dict = Depends(require_module("media"))):
     docs = await db.vod.find({}, {"_id": 0}).to_list(500)
     return [_enrich_vod(d) for d in docs]
 
 
 @api_router.post("/vod")
-async def create_vod(body: VodBody, user: dict = Depends(require_role("admin", "operator"))):
+async def create_vod(body: VodBody, user: dict = Depends(require_module("media"))):
     doc = {"id": new_id(), "created_at": now_iso(), "playable": False, **body.model_dump()}
     await db.vod.insert_one(doc)
     doc.pop("_id", None)
@@ -283,7 +297,7 @@ class VodImportBody(BaseModel):
 
 
 @api_router.post("/vod/import")
-async def import_vod(body: VodImportBody, user: dict = Depends(require_role("admin", "operator"))):
+async def import_vod(body: VodImportBody, user: dict = Depends(require_module("media"))):
     """Transcode a remote file/stream URL into a seekable, playable VOD-HLS asset."""
     vid = new_id()
     try:
@@ -301,7 +315,7 @@ async def import_vod(body: VodImportBody, user: dict = Depends(require_role("adm
 
 
 @api_router.delete("/vod/{vod_id}")
-async def delete_vod(vod_id: str, user: dict = Depends(require_role("admin", "operator"))):
+async def delete_vod(vod_id: str, user: dict = Depends(require_module("media"))):
     import shutil as _sh
     res = await db.vod.delete_one({"id": vod_id})
     if res.deleted_count == 0:
@@ -311,7 +325,7 @@ async def delete_vod(vod_id: str, user: dict = Depends(require_role("admin", "op
 
 
 @api_router.post("/channels/{channel_id}/record")
-async def record_channel(channel_id: str, user: dict = Depends(require_role("admin", "operator"))):
+async def record_channel(channel_id: str, user: dict = Depends(require_module("engine"))):
     """Capture the current DVR window of a live channel into a permanent, playable VOD."""
     doc = await db.channels.find_one({"id": channel_id})
     if not doc:
@@ -348,12 +362,12 @@ class PlaylistBody(BaseModel):
 
 
 @api_router.get("/playlists")
-async def list_playlists(user: dict = Depends(get_current_user)):
+async def list_playlists(user: dict = Depends(require_module("media"))):
     return await db.playlists.find({}, {"_id": 0}).to_list(500)
 
 
 @api_router.post("/playlists")
-async def create_playlist(body: PlaylistBody, user: dict = Depends(require_role("admin", "operator"))):
+async def create_playlist(body: PlaylistBody, user: dict = Depends(require_module("media"))):
     doc = {"id": new_id(), "created_at": now_iso(), **body.model_dump()}
     await db.playlists.insert_one(doc)
     doc.pop("_id", None)
@@ -361,7 +375,7 @@ async def create_playlist(body: PlaylistBody, user: dict = Depends(require_role(
 
 
 @api_router.delete("/playlists/{playlist_id}")
-async def delete_playlist(playlist_id: str, user: dict = Depends(require_role("admin", "operator"))):
+async def delete_playlist(playlist_id: str, user: dict = Depends(require_module("media"))):
     res = await db.playlists.delete_one({"id": playlist_id})
     if res.deleted_count == 0:
         raise HTTPException(404, "Playlist not found")
@@ -402,7 +416,7 @@ async def overview(user: dict = Depends(get_current_user)):
 
 
 @api_router.get("/analytics")
-async def analytics(range: str = Query("1h"), user: dict = Depends(get_current_user)):
+async def analytics(range: str = Query("1h"), user: dict = Depends(require_module("analytics"))):
     points = {"1h": 60, "6h": 72, "24h": 96}.get(range, 60)
     return {
         "range": range,
@@ -424,14 +438,32 @@ class UserCreateBody(BaseModel):
     email: str
     password: str
     name: str = ""
-    role: str = "viewer"
+    role: str = "user"                 # "admin" (full) or "user" (module-scoped)
+    permissions: List[str] = Field(default_factory=list)
+
+
+class UserUpdateBody(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    password: Optional[str] = None
+    permissions: Optional[List[str]] = None
+
+
+def _user_public(d: dict) -> dict:
+    return {"id": str(d["_id"]), "email": d["email"], "name": d.get("name", ""),
+            "role": d.get("role", "user"), "permissions": d.get("permissions", []),
+            "superadmin": bool(d.get("superadmin")), "created_at": d.get("created_at")}
+
+
+@api_router.get("/modules")
+async def list_modules(user: dict = Depends(get_current_user)):
+    return {"modules": MODULES}
 
 
 @api_router.get("/users")
 async def list_users(user: dict = Depends(require_role("admin"))):
     docs = await db.users.find({}).to_list(500)
-    return [{"id": str(d["_id"]), "email": d["email"], "name": d.get("name", ""),
-             "role": d.get("role", "viewer"), "created_at": d.get("created_at")} for d in docs]
+    return [_user_public(d) for d in docs]
 
 
 @api_router.post("/users")
@@ -439,10 +471,42 @@ async def create_user(body: UserCreateBody, user: dict = Depends(require_role("a
     email = body.email.lower()
     if await db.users.find_one({"email": email}):
         raise HTTPException(400, "Email already exists")
+    role = body.role if body.role in ("admin", "user") else "user"
+    perms = MODULES if role == "admin" else [p for p in body.permissions if p in MODULES]
     doc = {"email": email, "password_hash": hash_password(body.password),
-           "name": body.name or email.split("@")[0], "role": body.role, "created_at": now_iso()}
+           "name": body.name or email.split("@")[0], "role": role,
+           "permissions": perms, "superadmin": False, "created_at": now_iso()}
     res = await db.users.insert_one(doc)
-    return {"id": str(res.inserted_id), "email": email, "name": doc["name"], "role": body.role}
+    doc["_id"] = res.inserted_id
+    return _user_public(doc)
+
+
+@api_router.put("/users/{user_id}")
+async def update_user(user_id: str, body: UserUpdateBody, user: dict = Depends(require_role("admin"))):
+    from bson import ObjectId
+    from bson.errors import InvalidId
+    try:
+        oid = ObjectId(user_id)
+    except InvalidId:
+        raise HTTPException(404, "User not found")
+    target = await db.users.find_one({"_id": oid})
+    if not target:
+        raise HTTPException(404, "User not found")
+    update = {}
+    if body.name is not None:
+        update["name"] = body.name
+    if body.password:
+        update["password_hash"] = hash_password(body.password)
+    if not target.get("superadmin"):
+        if body.role in ("admin", "user"):
+            update["role"] = body.role
+        if body.permissions is not None:
+            update["permissions"] = [p for p in body.permissions if p in MODULES]
+        if update.get("role") == "admin":
+            update["permissions"] = MODULES
+    await db.users.update_one({"_id": oid}, {"$set": update})
+    doc = await db.users.find_one({"_id": oid})
+    return _user_public(doc)
 
 
 @api_router.delete("/users/{user_id}")
@@ -455,6 +519,9 @@ async def delete_user(user_id: str, user: dict = Depends(require_role("admin")))
         oid = ObjectId(user_id)
     except InvalidId:
         raise HTTPException(404, "User not found")
+    target = await db.users.find_one({"_id": oid})
+    if target and target.get("superadmin"):
+        raise HTTPException(400, "Cannot delete the super admin")
     res = await db.users.delete_one({"_id": oid})
     if res.deleted_count == 0:
         raise HTTPException(404, "User not found")
@@ -498,7 +565,7 @@ def _chan_public(c: dict) -> dict:
 
 
 @api_router.get("/engine/status")
-async def engine_status(user: dict = Depends(get_current_user)):
+async def engine_status(user: dict = Depends(require_module("engine"))):
     s = caps.summary()
     s.update({"ladders": list(engine.LADDERS.keys()),
               "active_encoders": engine.active_count(),
@@ -507,13 +574,13 @@ async def engine_status(user: dict = Depends(get_current_user)):
 
 
 @api_router.get("/channels")
-async def list_channels(user: dict = Depends(get_current_user)):
+async def list_channels(user: dict = Depends(require_module("engine"))):
     docs = await db.channels.find({}, {"_id": 0}).to_list(200)
     return [_chan_public(d) for d in docs]
 
 
 @api_router.get("/channels/{channel_id}")
-async def get_channel(channel_id: str, user: dict = Depends(get_current_user)):
+async def get_channel(channel_id: str, user: dict = Depends(require_module("engine"))):
     doc = await db.channels.find_one({"id": channel_id}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Channel not found")
@@ -523,14 +590,14 @@ async def get_channel(channel_id: str, user: dict = Depends(get_current_user)):
 
 
 @api_router.post("/channels")
-async def create_channel(body: ChannelBody, user: dict = Depends(require_role("admin", "operator"))):
+async def create_channel(body: ChannelBody, user: dict = Depends(require_module("engine"))):
     doc = {"id": new_id(), "created_at": now_iso(), "status": "idle", **body.model_dump()}
     await db.channels.insert_one(doc)
     return _chan_public({k: v for k, v in doc.items() if k != "_id"})
 
 
 @api_router.post("/channels/{channel_id}/start")
-async def start_channel(channel_id: str, user: dict = Depends(require_role("admin", "operator"))):
+async def start_channel(channel_id: str, user: dict = Depends(require_module("engine"))):
     doc = await db.channels.find_one({"id": channel_id})
     if not doc:
         raise HTTPException(404, "Channel not found")
@@ -561,7 +628,7 @@ async def start_channel(channel_id: str, user: dict = Depends(require_role("admi
 
 
 @api_router.post("/channels/{channel_id}/stop")
-async def stop_channel(channel_id: str, user: dict = Depends(require_role("admin", "operator"))):
+async def stop_channel(channel_id: str, user: dict = Depends(require_module("engine"))):
     engine.stop_channel(channel_id)
     await db.channels.update_one({"id": channel_id}, {"$set": {"status": "idle"}})
     doc = await db.channels.find_one({"id": channel_id}, {"_id": 0})
@@ -571,12 +638,12 @@ async def stop_channel(channel_id: str, user: dict = Depends(require_role("admin
 
 
 @api_router.get("/channels/{channel_id}/stats")
-async def channel_stats(channel_id: str, user: dict = Depends(get_current_user)):
+async def channel_stats(channel_id: str, user: dict = Depends(require_module("engine"))):
     return {**engine.channel_stats(channel_id), "log": engine.tail_log(channel_id, 25)}
 
 
 @api_router.delete("/channels/{channel_id}")
-async def delete_channel(channel_id: str, user: dict = Depends(require_role("admin", "operator"))):
+async def delete_channel(channel_id: str, user: dict = Depends(require_module("engine"))):
     engine.stop_channel(channel_id)
     res = await db.channels.delete_one({"id": channel_id})
     if res.deleted_count == 0:
@@ -585,7 +652,7 @@ async def delete_channel(channel_id: str, user: dict = Depends(require_role("adm
 
 
 @api_router.post("/engine/probe")
-async def probe_source(body: ProbeBody, user: dict = Depends(require_role("admin", "operator"))):
+async def probe_source(body: ProbeBody, user: dict = Depends(require_module("engine"))):
     return engine.probe(body.source)
 
 
@@ -626,7 +693,7 @@ def _gpu_stats():
 
 
 @api_router.get("/system/stats")
-async def system_stats(user: dict = Depends(get_current_user)):
+async def system_stats(user: dict = Depends(require_module("system"))):
     vm = psutil.virtual_memory()
     disk = psutil.disk_usage("/")
     try:
@@ -651,12 +718,12 @@ async def system_stats(user: dict = Depends(get_current_user)):
 
 
 @api_router.get("/system/capabilities")
-async def system_capabilities(user: dict = Depends(get_current_user)):
+async def system_capabilities(user: dict = Depends(require_module("system"))):
     return caps.summary()
 
 
 @api_router.get("/system/guard")
-async def get_guard(user: dict = Depends(get_current_user)):
+async def get_guard(user: dict = Depends(require_module("system"))):
     return await _get_guard()
 
 
@@ -689,7 +756,7 @@ class StorageBody(BaseModel):
 
 
 @api_router.get("/system/storage")
-async def get_storage(user: dict = Depends(require_role("admin", "operator"))):
+async def get_storage(user: dict = Depends(require_module("system"))):
     cfg = await db.settings.find_one({"_id": "s3"})
     return storage.masked(cfg)
 

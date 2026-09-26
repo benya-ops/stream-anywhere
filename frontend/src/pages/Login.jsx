@@ -5,12 +5,10 @@ import { formatApiError } from "@/lib/api";
 import { Signal, Loader2 } from "lucide-react";
 
 export default function Login() {
-  const { login, register } = useAuth();
+  const { login } = useAuth();
   const navigate = useNavigate();
-  const [mode, setMode] = useState("login");
-  const [email, setEmail] = useState("admin@streamanywhere.io");
-  const [password, setPassword] = useState("Broadcast2026!");
-  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -19,8 +17,7 @@ export default function Login() {
     setError("");
     setLoading(true);
     try {
-      if (mode === "login") await login(email, password);
-      else await register(email, password, name);
+      await login(email, password);
       navigate("/");
     } catch (err) {
       setError(formatApiError(err.response?.data?.detail) || err.message);
@@ -51,26 +48,11 @@ export default function Login() {
         </div>
 
         <div className="rounded-xl border border-[#1E293B] bg-[#0F172A]/80 p-6 backdrop-blur-xl shadow-2xl">
-          <div className="mb-5 flex rounded-lg border border-[#1E293B] p-1">
-            {["login", "register"].map((m) => (
-              <button
-                key={m}
-                data-testid={`tab-${m}`}
-                onClick={() => { setMode(m); setError(""); }}
-                className={`flex-1 rounded-md py-2 text-sm font-medium transition-colors ${
-                  mode === m ? "bg-sky-500/15 text-sky-300" : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                {m === "login" ? "Sign In" : "Create Account"}
-              </button>
-            ))}
-          </div>
+          <h2 className="mb-1 font-display text-lg font-semibold text-slate-100">Sign in</h2>
+          <p className="mb-5 text-sm text-slate-400">Access is managed by your administrator.</p>
 
           <form onSubmit={submit} className="space-y-4">
-            {mode === "register" && (
-              <Field label="Name" testid="input-name" value={name} onChange={setName} placeholder="Jane Operator" />
-            )}
-            <Field label="Email" testid="input-email" value={email} onChange={setEmail} type="email" placeholder="you@broadcast.tv" />
+            <Field label="Email" testid="input-email" value={email} onChange={setEmail} type="email" placeholder="you@company.tv" />
             <Field label="Password" testid="input-password" value={password} onChange={setPassword} type="password" placeholder="••••••••" />
 
             {error && (
@@ -86,12 +68,12 @@ export default function Login() {
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-sky-500 to-indigo-600 py-2.5 font-display font-semibold text-white shadow-lg shadow-sky-500/20 transition-transform hover:scale-[1.01] disabled:opacity-60"
             >
               {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-              {mode === "login" ? "Enter Control Room" : "Create Account"}
+              Enter Control Room
             </button>
           </form>
 
           <p className="mt-4 text-center font-mono text-[11px] text-slate-500">
-            Demo admin: admin@streamanywhere.io / Broadcast2026!
+            No account? Ask your administrator to create one.
           </p>
         </div>
       </div>

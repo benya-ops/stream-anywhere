@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import { useAuth } from "@/context/AuthContext";
+import { useAuth, canAccess } from "@/context/AuthContext";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard, Radio, Cable, SlidersHorizontal, Film,
@@ -8,16 +8,16 @@ import {
 import { useState } from "react";
 
 const NAV = [
-  { to: "/", label: "Mission Control", icon: LayoutDashboard, end: true, testid: "nav-overview" },
-  { to: "/engine", label: "Media Server", icon: Server, testid: "nav-engine" },
-  { to: "/streams", label: "Live Streams", icon: Radio, testid: "nav-streams" },
-  { to: "/sources", label: "Input Sources", icon: Cable, testid: "nav-sources" },
-  { to: "/transcoding", label: "Transcoding", icon: SlidersHorizontal, testid: "nav-transcoding" },
-  { to: "/media", label: "VOD & Playout", icon: Film, testid: "nav-media" },
-  { to: "/analytics", label: "Analytics", icon: BarChart3, testid: "nav-analytics" },
-  { to: "/system", label: "System & Server", icon: Activity, testid: "nav-system" },
-  { to: "/users", label: "Access Control", icon: Users, adminOnly: true, testid: "nav-users" },
-  { to: "/settings", label: "Settings", icon: Settings, testid: "nav-settings" },
+  { to: "/", label: "Mission Control", icon: LayoutDashboard, end: true, module: "overview", testid: "nav-overview" },
+  { to: "/engine", label: "Media Server", icon: Server, module: "engine", testid: "nav-engine" },
+  { to: "/streams", label: "Live Streams", icon: Radio, module: "streams", testid: "nav-streams" },
+  { to: "/sources", label: "Input Sources", icon: Cable, module: "sources", testid: "nav-sources" },
+  { to: "/transcoding", label: "Transcoding", icon: SlidersHorizontal, module: "transcoding", testid: "nav-transcoding" },
+  { to: "/media", label: "VOD & Playout", icon: Film, module: "media", testid: "nav-media" },
+  { to: "/analytics", label: "Analytics", icon: BarChart3, module: "analytics", testid: "nav-analytics" },
+  { to: "/system", label: "System & Server", icon: Activity, module: "system", testid: "nav-system" },
+  { to: "/users", label: "Access Control", icon: Users, module: "users", testid: "nav-users" },
+  { to: "/settings", label: "Settings", icon: Settings, module: null, testid: "nav-settings" },
 ];
 
 export default function AppLayout({ children }) {
@@ -25,7 +25,7 @@ export default function AppLayout({ children }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
 
-  const items = NAV.filter((n) => !n.adminOnly || user?.role === "admin");
+  const items = NAV.filter((n) => n.module === null || canAccess(user, n.module));
 
   const Sidebar = (
     <aside className="flex h-full w-64 flex-col border-r border-[#1E293B] bg-[#070A0F]">

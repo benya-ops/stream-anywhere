@@ -20,13 +20,6 @@ export function AuthProvider({ children }) {
     return data.user;
   };
 
-  const register = async (email, password, name) => {
-    const { data } = await api.post("/auth/register", { email, password, name });
-    if (data.access_token) localStorage.setItem("sa_token", data.access_token);
-    setUser(data.user);
-    return data.user;
-  };
-
   const logout = async () => {
     try { await api.post("/auth/logout"); } catch (e) { /* ignore */ }
     localStorage.removeItem("sa_token");
@@ -34,10 +27,19 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, setUser, login, register, logout }}>
+    <AuthContext.Provider value={{ user, setUser, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
 }
 
 export const useAuth = () => useContext(AuthContext);
+
+// module access helper
+export function canAccess(user, module) {
+  if (!user) return false;
+  if (user.role === "admin") return true;
+  if (module === "overview") return true;
+  if (module === "users") return false;
+  return (user.permissions || []).includes(module);
+}
