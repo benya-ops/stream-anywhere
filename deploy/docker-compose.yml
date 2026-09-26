@@ -18,7 +18,13 @@ services:
     env_file:
       - .env
     environment:
+      # explicit so container env is authoritative (a baked backend/.env can never win)
       - MONGO_URL=mongodb://mongo:27017
+      - DB_NAME=${DB_NAME:-stream_anywhere}
+      - JWT_SECRET=${JWT_SECRET}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@streamanywhere.io}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
       - HLS_ROOT=/data/hls
       - INGEST_LISTENERS_ENABLED=1
     depends_on:

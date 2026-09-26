@@ -1,0 +1,13 @@
+# Never bake local env/secrets or heavy dirs into images
+**/.env
+**/.env.*
+backend/.env
+frontend/.env
+**/__pycache__/
+**/*.pyc
+backend/hls_output/
+backend/vod_store/
+frontend/node_modules/
+frontend/build/
+.git/
+.emergent/
