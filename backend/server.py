@@ -312,6 +312,45 @@ async def reset_presets(user: dict = Depends(require_role("admin"))):
     return await get_presets()
 
 
+# ---- Delivery / CDN configuration ----
+class DeliveryBody(BaseModel):
+    cdn_base: str = ""
+
+
+async def get_delivery() -> dict:
+    doc = await db.settings.find_one({"_id": "app_delivery"})
+    return {"cdn_base": (doc or {}).get("cdn_base", "")}
+
+
+@api_router.get("/config/delivery")
+async def read_delivery(user: dict = Depends(get_current_user)):
+    return await get_delivery()
+
+
+@api_router.put("/config/delivery")
+async def write_delivery(body: DeliveryBody, user: dict = Depends(require_role("admin"))):
+    cdn = (body.cdn_base or "").strip().rstrip("/")
+    await db.settings.update_one({"_id": "app_delivery"}, {"$set": {"cdn_base": cdn}}, upsert=True)
+    return await get_delivery()
+
+
+# ---- Purge demo / sample data (make the server a clean production instance) ----
+@api_router.post("/admin/purge-demo")
+async def purge_demo(user: dict = Depends(require_role("admin"))):
+    # stop any running encoders first so we don't leave orphan ffmpeg processes
+    for cid in list(engine._registry.keys()):
+        try:
+            engine.stop_channel(cid)
+        except Exception:
+            pass
+    counts = {}
+    for coll in ("streams", "channels", "sources", "vod", "playlists", "profiles"):
+        res = await db[coll].delete_many({})
+        counts[coll] = res.deleted_count
+    return {"ok": True, "deleted": counts}
+
+
+
 
 # =====================================================================
 # VOD + Playlists
@@ -449,30 +488,34 @@ async def delete_playlist(playlist_id: str, user: dict = Depends(require_module(
 # =====================================================================
 @api_router.get("/overview")
 async def overview(user: dict = Depends(get_current_user)):
-    streams = await db.streams.find({}, {"_id": 0}).to_list(500)
-    live = [enrich_stream(s) for s in streams if s.get("status") == "live"]
-    total_viewers = sum(s["metrics"]["viewers"] for s in live)
-    total_ingest = sum(s["metrics"]["bitrate_mbps"] for s in live)
-    total_egress = round(total_ingest * 1.35 + total_viewers * 0.0025, 1)
-    avg_cpu = round(sum(s["metrics"]["cpu_pct"] for s in live) / len(live), 1) if live else 0
-    sources_count = await db.sources.count_documents({})
-    connected = await db.sources.count_documents({"status": "connected"})
+    docs = await db.channels.find({}, {"_id": 0}).to_list(500)
+    channels = [_chan_public(d) for d in docs]
+    live = [c for c in channels if c.get("stats", {}).get("running")]
+    total_renditions = sum(c.get("stats", {}).get("variants", 0) for c in live)
+    cpu = psutil.cpu_percent(interval=0.2)
+    mem = psutil.virtual_memory().percent
+    try:
+        disk = psutil.disk_usage("/").percent
+    except Exception:
+        disk = 0
     return {
         "live_count": len(live),
-        "total_streams": len(streams),
-        "total_viewers": total_viewers,
-        "ingest_mbps": round(total_ingest, 1),
-        "egress_mbps": total_egress,
-        "avg_cpu_pct": avg_cpu,
-        "sources_total": sources_count,
-        "sources_connected": connected,
-        "nodes": [
-            {"name": "edge-eu-west-01", "region": "EU-West", "cpu": live_metrics("node-eu")["cpu_pct"],
-             "gpu": live_metrics("node-eu")["gpu_pct"], "status": "healthy"},
-            {"name": "edge-us-east-01", "region": "US-East", "cpu": live_metrics("node-us")["cpu_pct"],
-             "gpu": live_metrics("node-us")["gpu_pct"], "status": "healthy"},
-            {"name": "edge-ap-south-01", "region": "AP-South", "cpu": live_metrics("node-ap")["cpu_pct"],
-             "gpu": live_metrics("node-ap")["gpu_pct"], "status": "degraded"},
+        "total_channels": len(channels),
+        "active_encoders": engine.active_count(),
+        "total_renditions": total_renditions,
+        "cpu_pct": round(cpu, 1),
+        "mem_pct": round(mem, 1),
+        "disk_pct": round(disk, 1),
+        "ffmpeg_available": engine.ffmpeg_available(),
+        "channels": [
+            {"id": c["id"], "name": c["name"], "status": c.get("status", "idle"),
+             "ladder": c.get("ladder", ""), "fps": c.get("fps", ""), "source": c.get("source", ""),
+             "dvr": bool(c.get("dvr")), "playback_url": c.get("playback_url"),
+             "running": c.get("stats", {}).get("running", False),
+             "has_master": c.get("stats", {}).get("has_master", False),
+             "variants": c.get("stats", {}).get("variants", 0),
+             "qc": c.get("stats", {}).get("qc", {})}
+            for c in channels
         ],
     }
 
@@ -928,13 +971,15 @@ async def startup():
     await db.login_attempts.create_index("identifier")
     await db.streams.create_index("id")
     await seed_admin()
-    await seed_sample_data()
-    if await db.channels.count_documents({}) == 0:
-        await db.channels.insert_one({
-            "id": new_id(), "created_at": now_iso(), "status": "idle",
-            "name": "Demo — Test Pattern (1080p ABR)", "source": "test",
-            "ladder": "720p", "video_codec": "H.264", "audio_codec": "AAC", "region": "EU-West",
-        })
+    # Demo/sample data is OFF by default (production). Set SEED_DEMO=1 to populate showcase data.
+    if os.environ.get("SEED_DEMO", "").lower() in ("1", "true", "yes"):
+        await seed_sample_data()
+        if await db.channels.count_documents({}) == 0:
+            await db.channels.insert_one({
+                "id": new_id(), "created_at": now_iso(), "status": "idle",
+                "name": "Demo — Test Pattern (1080p ABR)", "source": "test",
+                "ladder": "720p", "video_codec": "H.264", "audio_codec": "AAC", "region": "EU-West",
+            })
     logger.info("Stream Anywhere API ready. FFmpeg=%s", engine.ffmpeg_available())
 
 
