@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="7" time="3.026" timestamp="2026-09-26T21:50:26.007645+00:00" hostname="agent-env-9a3eb75d-5a3f-4a01-a35a-a61050923413"><testcase classname="tests.test_prod_streams.TestChannelLifecycle" name="test_create_start_stop_delete" time="2.083"><failure message="assert 404 in (200, 204)&#10; +  where 404 = &lt;Response [404]&gt;.status_code">backend/tests/test_prod_streams.py:94: in test_create_start_stop_delete
+    assert r.status_code == 200, r.text
+E   AssertionError: {"detail":"Encoder did not produce output. testpattern: No such file or directory"}
+E   assert 500 == 200
+E    +  where 500 = &lt;Response [500]&gt;.status_code
+
+During handling of the above exception, another exception occurred:
+backend/tests/test_prod_streams.py:112: in test_create_start_stop_delete
+    assert r.status_code in (200, 204)
+E   assert 404 in (200, 204)
+E    +  where 404 = &lt;Response [404]&gt;.status_code</failure></testcase><testcase classname="tests.test_prod_streams.TestDelivery" name="test_get_default_empty" time="1.521" /><testcase classname="tests.test_prod_streams.TestDelivery" name="test_put_trims_trailing_slash" time="0.135" /><testcase classname="tests.test_prod_streams.TestDelivery" name="test_reset_empty" time="0.151" /><testcase classname="tests.test_prod_streams.TestPurge" name="test_purge_returns_counts" time="0.198" /><testcase classname="tests.test_prod_streams.TestChannelLifecycle" name="test_edit_persists" time="0.258" /><testcase classname="tests.test_prod_streams.TestOverview" name="test_shape_real" time="0.269" /></testsuite></testsuites>

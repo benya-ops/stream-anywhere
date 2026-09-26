@@ -347,6 +347,13 @@ async def purge_demo(user: dict = Depends(require_role("admin"))):
     for coll in ("streams", "channels", "sources", "vod", "playlists", "profiles"):
         res = await db[coll].delete_many({})
         counts[coll] = res.deleted_count
+    # also wipe on-disk HLS/VOD working directories for a truly clean state
+    import shutil as _sh
+    for d in list(engine.HLS_ROOT.glob("*")):
+        try:
+            _sh.rmtree(d, ignore_errors=True)
+        except Exception:
+            pass
     return {"ok": True, "deleted": counts}
 
 

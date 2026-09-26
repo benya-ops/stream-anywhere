@@ -52,6 +52,15 @@ functionality + work with all codecs. Product name: **Stream Anywhere**.
 ## Auth model note
 - canAccess: `guide` open to all logged-in; `presets` admin-only (not a grantable module).
 
+## Production hardening (2026-06) — real server, no mocks
+- **Demo data OFF by default:** startup seeding gated behind env `SEED_DEMO=1`. Fresh installs start empty (production).
+- **Clear demo data:** admin `POST /api/admin/purge-demo` (button on Live Streams) wipes streams/channels/sources/vod/playlists/profiles AND on-disk HLS dirs.
+- **Live Streams is now REAL:** page rebuilt on the real engine (`/api/channels`) — real Start/Stop/Edit/Delete, real ingest endpoint, and **real HLS preview served from the origin** (`/api/hls/{id}/master.m3u8`) via HlsPlayer. Removed the fake `cdn.streamanywhere.io` URL, the canvas StreamPreview, and simulated telemetry.
+- **CDN config:** admin `GET/PUT /api/config/delivery` ({cdn_base}) + card on Live Streams. Empty by default → serve from origin. When set, preview shows both origin + CDN distribution URLs but the PLAYER always uses origin. Trailing slash trimmed.
+- **Mission Control is REAL:** `/api/overview` rewritten to real channels + host psutil (cpu/mem/disk) + FFmpeg status + per-channel QC and live HLS grid. Removed fabricated edge nodes / viewer counts / bandwidth.
+- Note: `/api/analytics` and the legacy `db.streams` endpoints remain (simulated) but are no longer used by Overview/Streams UI.
+- Tested: iter9 100% backend (test_prod_streams.py 7/7) + 100% frontend (no fake cdn string anywhere, origin/CDN URLs correct, purge clears all).
+
 ## Backlog / next
 - P1: LL-HLS + simultaneous MPEG-DASH packaging.
 - P1: Multi-node clustering / load balancing.

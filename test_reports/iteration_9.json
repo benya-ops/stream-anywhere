@@ -1,0 +1,24 @@
+{
+  "summary": "Iteration 9 — production Live Streams / Overview / CDN / purge-demo verification. Backend pytest 7/7 passed (test_prod_streams.py): GET/PUT /api/config/delivery persists and trims trailing slash; /api/overview returns real fields live_count/total_channels/active_encoders/cpu_pct/mem_pct/disk_pct/ffmpeg_available/channels and contains NO fabricated edge-node/viewer fields; channel create returns playback_url=/api/hls/{id}/master.m3u8 (never fake cdn.streamanywhere.io); start-channel with source='test' (lavfi) produces master.m3u8 reachable at /api/hls/{id}/master.m3u8 with #EXTM3U; edit persists name+fps; /admin/purge-demo returns {ok, deleted:{streams,channels,sources,vod,playlists,profiles}} and tables become empty. UI (Playwright, admin): global grep — 'cdn.streamanywhere.io' does not appear in /overview or /streams pages. Overview shows stat-live, stat-encoders, stat-cpu, stat-mem cards. Streams page shows cdn-config card, purge-demo-btn, new-stream-btn. Full lifecycle exercised: created TEST_ui_stream (source=test), Start → wait 6s → Preview modal shows 'playback (origin)' with /api/hls/{cid}/master.m3u8 and 'No CDN configured' note when cdn_base empty. Saved CDN https://cdn.example.com/live/ → PUT trims to https://cdn.example.com/live → preview modal now shows both 'playback (origin)' and 'playback (CDN)' with https://cdn.example.com/live/{cid}/master.m3u8. HlsPlayer video element uses hls.js (video.src null in Chromium since H.264 unsupported — expected, per request note). Reset CDN to empty, deleted channel, purge-demo cleared remaining data.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_prod_streams.py",
+    "/app/test_reports/pytest/pytest_prod_streams.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Streams.jsx openCreate default source is 'test' — good for local demos, but on a production install without ffmpeg lavfi (unlikely) the New Stream would fail; consider surfacing engine capabilities.sources in the field-source select instead of hardcoded options.",
+    "server.py /admin/purge-demo also stops all running encoders but does not clear the on-disk HLS output segments; if operators want a truly clean state, also delete the HLS working dir contents.",
+    "server.py /overview computes cpu_pct with psutil.cpu_percent(interval=0.2) which blocks 200ms per request; under many overview pollers this can be measurable. Consider a cached snapshot updated by a background task.",
+    "Streams.jsx saveCdn updates cdnInput via setCdnInput(data.cdn_base) but if the user types with trailing slash they see the input snap; consider trimming client-side too for immediate feedback."
+  ],
+  "updated_files": ["/app/backend/tests/test_prod_streams.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "admin@streamanywhere.io / Broadcast2026!",
+  "seed_data_creation": "None persisted. All test channels created during tests were stopped + deleted; /admin/purge-demo called at end to guarantee clean DB.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Regression file: /app/backend/tests/test_prod_streams.py. Key UI selectors validated: nav-streams, nav-overview, new-stream-btn, empty-new-stream, field-name, field-source (native <select>, use select_option value='test' for lavfi test-pattern), save-stream, stream-row-<id>, start-btn-<id>, stop-btn-<id>, edit-btn-<id>, delete-btn-<id>, preview-btn-<id>, cdn-config, cdn-input, cdn-save, purge-demo-btn; Overview stat-live/encoders/cpu/mem. Preview modal renders 'playback (origin)' always and 'playback (CDN)' only when delivery.cdn_base is non-empty; HlsPlayer <video> src stays empty in Chromium because hls.js is used and MSE H.264 not decodable in headless test browser — this is expected; assert on URLs/manifest not on video pixels. No fake 'cdn.streamanywhere.io' string exists anywhere in frontend or backend source.",
+  "rca of the issue": "N/A — no bugs found in this iteration."
+}
