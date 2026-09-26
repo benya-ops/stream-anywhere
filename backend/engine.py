@@ -112,8 +112,17 @@ def _scale_suffix(hw: str):
 
 def build_cmd(channel_id: str, source: str, source_url: str, ingest_port: int,
               ladder_key: str, video_codec: str, audio_codec: str, hw: str,
-              push_url: str = "", dvr: bool = False) -> tuple:
-    rungs = LADDERS.get(ladder_key, LADDERS["720p"])
+              push_url: str = "", dvr: bool = False, fps: str = "",
+              keyframe_s: float = 2.0, segment_s: int = 4, rungs=None) -> tuple:
+    if rungs is None:
+        rungs = LADDERS.get(ladder_key, LADDERS["720p"])
+    rungs = [tuple(r) for r in rungs]
+    try:
+        fps_f = float(fps) if fps else 50.0
+    except (ValueError, TypeError):
+        fps_f = 50.0
+    gop = max(2, round(fps_f * (keyframe_s or 2.0)))
+    fps_filter = f",fps={fps}" if fps else ""
     venc, eff_hw = caps.resolve_encoder(video_codec, hw)
     aenc = caps.audio_encoder(audio_codec)
     in_args, audio_map, need_shortest = _input_args(source, source_url, ingest_port)
@@ -126,7 +135,7 @@ def build_cmd(channel_id: str, source: str, source_url: str, ingest_port: int,
     # QC (black/freeze) detection at head, then split into N renditions
     head = "[0:v]blackdetect=d=0.5:pic_th=0.98,freezedetect=n=-60dB:d=0.5,"
     head += f"split={n}" + "".join(f"[v{i}]" for i in range(n)) + ";"
-    scales = ";".join(f"[v{i}]scale=w=-2:h={r[0]}{_scale_suffix(eff_hw)}[v{i}out]"
+    scales = ";".join(f"[v{i}]scale=w=-2:h={r[0]}{fps_filter}{_scale_suffix(eff_hw)}[v{i}out]"
                       for i, r in enumerate(rungs))
     cmd += ["-filter_complex", head + scales]
 
@@ -140,7 +149,7 @@ def build_cmd(channel_id: str, source: str, source_url: str, ingest_port: int,
         elif venc == "libsvtav1":
             cmd += [f"-preset:v:{i}", "8"]
         cmd += [f"-b:v:{i}", f"{vk}k", f"-maxrate:v:{i}", f"{int(vk*1.1)}k",
-                f"-bufsize:v:{i}", f"{vk*2}k", "-g", "60", "-keyint_min", "60", "-sc_threshold", "0"]
+                f"-bufsize:v:{i}", f"{vk*2}k", "-g", str(gop), "-keyint_min", str(gop), "-sc_threshold", "0"]
         cmd += ["-map", audio_map, f"-c:a:{i}", aenc, f"-b:a:{i}", f"{ak}k", "-ac", "2"]
         var_map.append(f"v:{i},a:{i}")
 
@@ -155,7 +164,7 @@ def build_cmd(channel_id: str, source: str, source_url: str, ingest_port: int,
         hls_flags = "independent_segments+delete_segments+program_date_time"
         hls_tail = ["-hls_list_size", "6"]
     cmd += [
-        "-f", "hls", "-hls_time", "4", *hls_tail,
+        "-f", "hls", "-hls_time", str(segment_s), *hls_tail,
         "-hls_flags", hls_flags,
         "-hls_segment_type", "mpegts",
         "-hls_segment_filename", str(d / "seg_%v_%03d.ts"),
@@ -183,7 +192,8 @@ def _preexec():
 
 def start_channel(channel_id: str, source: str, source_url: str, ingest_port: int,
                   ladder_key: str, video_codec: str, audio_codec: str, hw: str,
-                  push_url: str = "", dvr: bool = False) -> dict:
+                  push_url: str = "", dvr: bool = False, fps: str = "",
+                  keyframe_s: float = 2.0, segment_s: int = 4, rungs=None) -> dict:
     if not ffmpeg_available():
         raise RuntimeError("FFmpeg is not installed on this host.")
     if source in ("srt-listen", "rtmp-listen") and not LISTENERS_ENABLED:
@@ -198,7 +208,8 @@ def start_channel(channel_id: str, source: str, source_url: str, ingest_port: in
     d.mkdir(parents=True, exist_ok=True)
 
     cmd, eff_hw = build_cmd(channel_id, source, source_url, ingest_port, ladder_key,
-                            video_codec, audio_codec, hw, push_url, dvr)
+                            video_codec, audio_codec, hw, push_url, dvr,
+                            fps=fps, keyframe_s=keyframe_s, segment_s=segment_s, rungs=rungs)
     log_file = open(d / "ffmpeg.log", "wb")
     proc = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT, preexec_fn=_preexec)
     _registry[channel_id] = {

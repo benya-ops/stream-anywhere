@@ -16,6 +16,8 @@ import Media from "@/pages/Media";
 import Analytics from "@/pages/Analytics";
 import UsersPage from "@/pages/Users";
 import SettingsPage from "@/pages/Settings";
+import Presets from "@/pages/Presets";
+import Guide from "@/pages/Guide";
 
 function Protected({ children, module }) {
   const { user } = useAuth();
@@ -41,6 +43,8 @@ function App() {
             <Route path="/media" element={<Protected module="media"><Media /></Protected>} />
             <Route path="/analytics" element={<Protected module="analytics"><Analytics /></Protected>} />
             <Route path="/users" element={<Protected module="users"><UsersPage /></Protected>} />
+            <Route path="/presets" element={<Protected module="presets"><Presets /></Protected>} />
+            <Route path="/guide" element={<Protected module="guide"><Guide /></Protected>} />
             <Route path="/settings" element={<Protected><SettingsPage /></Protected>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

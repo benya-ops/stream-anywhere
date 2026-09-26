@@ -68,8 +68,23 @@ _ENCODER_MATRIX = {
     "H.265/HEVC": {"CPU": "libx265", "NVENC": "hevc_nvenc", "QSV": "hevc_qsv", "VAAPI": "hevc_vaapi"},
     "AV1": {"CPU": "libsvtav1", "NVENC": "av1_nvenc", "QSV": "av1_qsv", "VAAPI": "av1_vaapi"},
     "VP9": {"CPU": "libvpx-vp9", "VAAPI": "vp9_vaapi"},
+    "MPEG-2": {"CPU": "mpeg2video", "QSV": "mpeg2_qsv", "VAAPI": "mpeg2_vaapi"},
 }
-_AUDIO_ENCODERS = {"AAC": "aac", "Opus": "libopus", "MP3": "libmp3lame", "AC-3": "ac3"}
+_AUDIO_ENCODERS = {"AAC": "aac", "MP2": "mp2", "Opus": "libopus", "MP3": "libmp3lame", "AC-3": "ac3"}
+
+
+def available_video_codecs() -> list:
+    """Video codecs whose encoder actually exists on this FFmpeg build."""
+    out = []
+    for name, hw_map in _ENCODER_MATRIX.items():
+        if any(has_encoder(enc) for enc in hw_map.values()):
+            out.append(name)
+    return out or ["H.264"]
+
+
+def available_audio_codecs() -> list:
+    out = [name for name, enc in _AUDIO_ENCODERS.items() if has_encoder(enc)]
+    return out or ["AAC"]
 
 
 def resolve_encoder(video_codec: str, hw: str) -> tuple:
@@ -116,8 +131,8 @@ def summary() -> dict:
         "auto_hw": auto_hw(),
         "gpu_nvidia": has_gpu_nvidia(),
         "vaapi_device": has_vaapi_device(),
-        "video_codecs": list(_ENCODER_MATRIX.keys()),
-        "audio_codecs": list(_AUDIO_ENCODERS.keys()),
+        "video_codecs": available_video_codecs(),
+        "audio_codecs": available_audio_codecs(),
         "input_protocols": input_protocols(),
         "output_protocols": output_protocols(),
     }

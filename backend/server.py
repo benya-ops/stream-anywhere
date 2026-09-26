@@ -55,6 +55,36 @@ def require_module(mod: str):
 
 
 # =====================================================================
+# Configurable presets (admin-managed, DB-backed — nothing hardcoded in UI)
+# =====================================================================
+DEFAULT_PRESETS = {
+    "frame_rates": ["25", "50", "30", "60", "24", "23.976", "29.97", "59.94"],
+    "resolutions": ["2160p", "1080p", "720p", "576p", "480p", "360p", "audio"],
+    "regions": ["EU-West", "EU-Central", "US-East", "US-West", "AP-South", "Global"],
+    "protocols_out": ["HLS", "LL-HLS", "MPEG-DASH", "RTMP", "SRT", "RTSP"],
+    # ABR ladders: key -> list of [height, video_kbps, audio_kbps]
+    "ladders": {
+        "1080p": [[1080, 6000, 128], [720, 3000, 128], [480, 1200, 96], [360, 600, 96]],
+        "720p": [[720, 3000, 128], [480, 1200, 96], [360, 600, 96]],
+        "480p": [[480, 1200, 96], [360, 600, 96]],
+        "single": [[720, 2800, 128]],
+    },
+    "defaults": {"fps": "50", "keyframe_s": 2.0, "hls_segment_s": 4, "ladder": "720p"},
+}
+
+
+async def get_presets() -> dict:
+    doc = await db.settings.find_one({"_id": "app_presets"})
+    if not doc:
+        return {k: (v.copy() if isinstance(v, (list, dict)) else v) for k, v in DEFAULT_PRESETS.items()}
+    doc.pop("_id", None)
+    # merge with defaults so newly-added keys always exist
+    merged = {**DEFAULT_PRESETS, **doc}
+    return merged
+
+
+
+# =====================================================================
 # Health
 # =====================================================================
 @api_router.get("/")
@@ -69,7 +99,8 @@ class StreamBody(BaseModel):
     name: str
     input: str = ""
     profile: str = ""
-    resolution: str = "1080p60"
+    resolution: str = "1080p"
+    fps: str = "50"
     protocols_out: List[str] = Field(default_factory=lambda: ["HLS"])
     dvr: bool = False
     region: str = "EU-West"
@@ -241,14 +272,45 @@ async def delete_profile(profile_id: str, user: dict = Depends(require_module("t
 
 @api_router.get("/codecs")
 async def supported_codecs(user: dict = Depends(get_current_user)):
-    """Catalogue of codecs / containers the engine can be configured for."""
+    """Catalogue of codecs / containers — video/audio are auto-detected from this server's FFmpeg."""
     return {
-        "video": ["H.264 / AVC", "H.265 / HEVC", "AV1", "VP9", "VP8", "MPEG-2", "ProRes"],
-        "audio": ["AAC", "Opus", "MP3", "AC-3", "E-AC-3", "FLAC", "PCM"],
-        "hardware": ["NVENC (NVIDIA)", "QSV (Intel)", "AMF (AMD)", "VideoToolbox (Apple)", "CPU (x264/x265)"],
+        "video": caps.available_video_codecs(),
+        "audio": caps.available_audio_codecs(),
+        "hardware": caps.hardware_accels(),
         "containers": ["fMP4", "TS", "WebM", "MKV", "MOV"],
-        "delivery": ["HLS", "LL-HLS", "MPEG-DASH", "WebRTC (WHEP)", "RTMP", "SRT", "RTSP"],
+        "delivery": caps.output_protocols(),
     }
+
+
+# =====================================================================
+# Configurable presets API
+# =====================================================================
+class PresetsBody(BaseModel):
+    frame_rates: List[str]
+    resolutions: List[str]
+    regions: List[str]
+    protocols_out: List[str]
+    ladders: dict
+    defaults: dict
+
+
+@api_router.get("/config/presets")
+async def read_presets(user: dict = Depends(get_current_user)):
+    return await get_presets()
+
+
+@api_router.put("/config/presets")
+async def write_presets(body: PresetsBody, user: dict = Depends(require_role("admin"))):
+    data = body.model_dump()
+    await db.settings.update_one({"_id": "app_presets"}, {"$set": data}, upsert=True)
+    return await get_presets()
+
+
+@api_router.post("/config/presets/reset")
+async def reset_presets(user: dict = Depends(require_role("admin"))):
+    await db.settings.delete_one({"_id": "app_presets"})
+    return await get_presets()
+
 
 
 # =====================================================================
@@ -537,6 +599,8 @@ class ChannelBody(BaseModel):
     source_url: str = ""          # used when source is a pull URL
     ingest_port: int = 9000       # used by srt-listen / rtmp-listen
     ladder: str = "720p"          # 1080p | 720p | 480p | single
+    fps: str = "50"               # output frame rate (transcode/convert to this)
+    keyframe_s: float = 2.0       # keyframe (GOP) interval in seconds
     video_codec: str = "H.264"
     audio_codec: str = "AAC"
     hw: str = "auto"              # auto | CPU | NVENC | VAAPI | QSV
@@ -567,7 +631,9 @@ def _chan_public(c: dict) -> dict:
 @api_router.get("/engine/status")
 async def engine_status(user: dict = Depends(require_module("engine"))):
     s = caps.summary()
-    s.update({"ladders": list(engine.LADDERS.keys()),
+    presets = await get_presets()
+    s.update({"ladders": list(presets.get("ladders", {}).keys()) or list(engine.LADDERS.keys()),
+              "frame_rates": presets.get("frame_rates", []),
               "active_encoders": engine.active_count(),
               "listeners_enabled": engine.LISTENERS_ENABLED})
     return s
@@ -596,6 +662,16 @@ async def create_channel(body: ChannelBody, user: dict = Depends(require_module(
     return _chan_public({k: v for k, v in doc.items() if k != "_id"})
 
 
+@api_router.put("/channels/{channel_id}")
+async def update_channel(channel_id: str, body: ChannelBody,
+                         user: dict = Depends(require_module("engine"))):
+    res = await db.channels.update_one({"id": channel_id}, {"$set": body.model_dump()})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Channel not found")
+    doc = await db.channels.find_one({"id": channel_id}, {"_id": 0})
+    return _chan_public(doc)
+
+
 @api_router.post("/channels/{channel_id}/start")
 async def start_channel(channel_id: str, user: dict = Depends(require_module("engine"))):
     doc = await db.channels.find_one({"id": channel_id})
@@ -611,10 +687,20 @@ async def start_channel(channel_id: str, user: dict = Depends(require_module("en
     if cpu >= guard["cpu_limit_pct"]:
         raise HTTPException(429, f"CPU too high ({cpu:.0f}% ≥ {guard['cpu_limit_pct']}%). Refusing to start to protect the server.")
     try:
+        presets = await get_presets()
+        pdef = presets.get("defaults", {})
+        ladder_key = doc.get("ladder", pdef.get("ladder", "720p"))
+        rungs = presets.get("ladders", {}).get(ladder_key)
+        fps = str(doc.get("fps") or pdef.get("fps", "50"))
+        keyframe_s = float(doc.get("keyframe_s") or pdef.get("keyframe_s", 2.0))
+        segment_s = int(pdef.get("hls_segment_s", 4))
         engine.start_channel(channel_id, doc.get("source", "test"), doc.get("source_url", ""),
-                             int(doc.get("ingest_port", 9000)), doc.get("ladder", "720p"),
+                             int(doc.get("ingest_port", 9000)), ladder_key,
                              doc.get("video_codec", "H.264"), doc.get("audio_codec", "AAC"),
-                             doc.get("hw", "auto"), doc.get("push_url", ""), bool(doc.get("dvr", False)))
+                             doc.get("hw", "auto"), doc.get("push_url", ""), bool(doc.get("dvr", False)),
+                             fps=fps, keyframe_s=keyframe_s, segment_s=segment_s, rungs=rungs)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"Failed to start encoder: {e}")
     ready = await engine.wait_for_master(channel_id, timeout=25)

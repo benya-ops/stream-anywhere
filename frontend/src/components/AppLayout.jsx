@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import {
   LayoutDashboard, Radio, Cable, SlidersHorizontal, Film,
   BarChart3, Users, Settings, LogOut, Signal, Menu, X, Server, Activity,
+  ListChecks, BookOpen,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -16,7 +17,9 @@ const NAV = [
   { to: "/media", label: "VOD & Playout", icon: Film, module: "media", testid: "nav-media" },
   { to: "/analytics", label: "Analytics", icon: BarChart3, module: "analytics", testid: "nav-analytics" },
   { to: "/system", label: "System & Server", icon: Activity, module: "system", testid: "nav-system" },
+  { to: "/presets", label: "Presets", icon: ListChecks, module: "presets", testid: "nav-presets" },
   { to: "/users", label: "Access Control", icon: Users, module: "users", testid: "nav-users" },
+  { to: "/guide", label: "Guide", icon: BookOpen, module: "guide", testid: "nav-guide" },
   { to: "/settings", label: "Settings", icon: Settings, module: null, testid: "nav-settings" },
 ];
 

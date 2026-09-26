@@ -40,6 +40,8 @@ export function canAccess(user, module) {
   if (!user) return false;
   if (user.role === "admin") return true;
   if (module === "overview") return true;
+  if (module === "guide") return true;
+  if (module === "presets") return false;
   if (module === "users") return false;
   return (user.permissions || []).includes(module);
 }

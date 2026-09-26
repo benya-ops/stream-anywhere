@@ -4,15 +4,15 @@ import { PageHeader, Loading, StatusBadge, Readout, CodecChip } from "@/componen
 import Modal, { TextField, SelectField, PrimaryButton, GhostButton } from "@/components/Modal";
 import HlsPlayer from "@/components/HlsPlayer";
 import { toast } from "sonner";
-import { Plus, Play, Square, Trash2, Server, Radio, Terminal, Search, Loader2, Save } from "lucide-react";
+import { Plus, Play, Square, Trash2, Server, Radio, Terminal, Search, Loader2, Save, Pencil } from "lucide-react";
 
-const empty = { name: "", source: "test", source_url: "", ingest_port: 9000, ladder: "720p", video_codec: "H.264", audio_codec: "AAC", hw: "auto", push_url: "", dvr: false, region: "EU-West" };
+const empty = { name: "", source: "test", source_url: "", ingest_port: 9000, ladder: "720p", fps: "50", keyframe_s: 2, video_codec: "H.264", audio_codec: "AAC", hw: "auto", push_url: "", dvr: false, region: "EU-West" };
 
 export default function Engine() {
   const [channels, setChannels] = useState(null);
   const [status, setStatus] = useState(null);
   const [selected, setSelected] = useState(null);
-  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(null); // null=closed, "new"=create, id=edit
   const [busy, setBusy] = useState(null);
   const [form, setForm] = useState(empty);
   const [probeText, setProbeText] = useState("");
@@ -34,11 +34,34 @@ export default function Engine() {
     return () => clearInterval(id);
   }, []);
 
-  const create = async () => {
+  const openCreate = () => {
+    setForm({ ...empty, fps: status?.frame_rates?.[0] || "50", ladder: status?.ladders?.[0] || "720p" });
+    setEditing("new");
+  };
+
+  const openEdit = (ch) => {
+    setForm({
+      name: ch.name, source: ch.source || "test", source_url: ch.source_url || "",
+      ingest_port: ch.ingest_port || 9000, ladder: ch.ladder || "720p",
+      fps: String(ch.fps || "50"), keyframe_s: ch.keyframe_s ?? 2,
+      video_codec: ch.video_codec || "H.264", audio_codec: ch.audio_codec || "AAC",
+      hw: ch.hw || "auto", push_url: ch.push_url || "", dvr: !!ch.dvr, region: ch.region || "EU-West",
+    });
+    setEditing(ch.id);
+  };
+
+  const save = async () => {
     try {
-      const { data } = await api.post("/channels", form);
-      toast.success("Channel created"); setOpen(false); setForm(empty);
-      await load(); setSelected(data);
+      const payload = { ...form, ingest_port: parseInt(form.ingest_port) || 9000, keyframe_s: parseFloat(form.keyframe_s) || 2 };
+      if (editing === "new") {
+        const { data } = await api.post("/channels", payload);
+        toast.success("Channel created"); setEditing(null); setForm(empty);
+        await load(); setSelected(data);
+      } else {
+        const { data } = await api.put(`/channels/${editing}`, payload);
+        toast.success("Channel updated"); setEditing(null); setForm(empty);
+        await load(); setSelected(data);
+      }
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
@@ -79,7 +102,7 @@ export default function Engine() {
   return (
     <div className="space-y-6">
       <PageHeader title="Media Server" subtitle="Real FFmpeg transcoding engine — live HLS ABR output that plays in the browser.">
-        <PrimaryButton testid="new-channel-btn" onClick={() => setOpen(true)}>
+        <PrimaryButton testid="new-channel-btn" onClick={openCreate}>
           <span className="flex items-center gap-1.5"><Plus className="h-4 w-4" /> New Channel</span>
         </PrimaryButton>
       </PageHeader>
@@ -166,6 +189,10 @@ export default function Engine() {
                     <span className="flex items-center gap-1.5"><Play className="h-4 w-4" /> {busy === selected.id ? "Starting…" : "Start Encoder"}</span>
                   </PrimaryButton>
                 )}
+                <button data-testid="edit-channel-btn" onClick={() => openEdit(selected)}
+                  className="flex items-center gap-1.5 rounded-lg border border-[#1E293B] px-4 py-2 text-sm text-slate-300 hover:bg-[#1E293B]">
+                  <Pencil className="h-4 w-4" /> Edit
+                </button>
                 <button data-testid="delete-channel-btn" onClick={() => remove(selected.id)}
                   className="flex items-center gap-1.5 rounded-lg border border-[#1E293B] px-4 py-2 text-sm text-slate-400 hover:bg-[#1E293B]">
                   <Trash2 className="h-4 w-4" /> Delete
@@ -231,8 +258,10 @@ export default function Engine() {
         </div>
       </div>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="New Channel" subtitle="Configure a real transcoding channel — ingest, codec, hardware & delivery."
-        footer={<><GhostButton testid="cancel-channel" onClick={() => setOpen(false)}>Cancel</GhostButton><PrimaryButton testid="save-channel" onClick={create}>Create Channel</PrimaryButton></>}>
+      <Modal open={!!editing} onClose={() => setEditing(null)}
+        title={editing === "new" ? "New Channel" : "Edit Channel"}
+        subtitle="Configure a real transcoding channel — ingest, codec, frame rate, hardware & delivery."
+        footer={<><GhostButton testid="cancel-channel" onClick={() => setEditing(null)}>Cancel</GhostButton><PrimaryButton testid="save-channel" onClick={save}>{editing === "new" ? "Create Channel" : "Save Changes"}</PrimaryButton></>}>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2"><TextField label="Channel Name" testid="ch-name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} placeholder="Studio A Live" /></div>
           <SelectField label="Ingest Source" testid="ch-source" value={form.source} onChange={(v) => setForm({ ...form, source: v })}
@@ -244,6 +273,8 @@ export default function Engine() {
               { value: "rtmp-listen", label: "RTMP Listener (push-in)" },
             ]} />
           <SelectField label="ABR Ladder" testid="ch-ladder" value={form.ladder} onChange={(v) => setForm({ ...form, ladder: v })} options={status.ladders} />
+          <SelectField label="Frame Rate (fps)" testid="ch-fps" value={form.fps} onChange={(v) => setForm({ ...form, fps: v })} options={status.frame_rates || ["50", "25", "60", "30"]} />
+          <TextField label="Keyframe (s)" testid="ch-keyframe" type="number" value={form.keyframe_s} onChange={(v) => setForm({ ...form, keyframe_s: v })} />
           {form.source === "url" && (
             <div className="sm:col-span-2"><TextField label="Pull URL" testid="ch-url" value={form.source_url} onChange={(v) => setForm({ ...form, source_url: v })} placeholder="https://…/index.m3u8 · rtsp://… · srt://…" /></div>
           )}

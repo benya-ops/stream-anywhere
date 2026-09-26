@@ -13,13 +13,13 @@ def _id():
 
 
 SAMPLE_PROFILES = [
-    {"name": "1080p60 Broadcast", "video_codec": "H.264", "hw": "NVENC", "audio_codec": "AAC",
-     "ladder": ["1080p60@6M", "720p60@3M", "480p30@1.2M", "360p30@0.6M"], "keyframe_s": 2.0, "gpu": True},
+    {"name": "1080p50 Broadcast", "video_codec": "H.264", "hw": "NVENC", "audio_codec": "AAC",
+     "ladder": ["1080p50@6M", "720p50@3M", "576p25@1.2M", "360p25@0.6M"], "keyframe_s": 2.0, "gpu": True},
     {"name": "HEVC HDR 4K", "video_codec": "H.265/HEVC", "hw": "NVENC", "audio_codec": "AAC",
-     "ladder": ["2160p60@18M", "1080p60@8M", "720p60@4M"], "keyframe_s": 2.0, "gpu": True},
-    {"name": "AV1 Low-Latency", "video_codec": "AV1", "hw": "QSV", "audio_codec": "Opus",
-     "ladder": ["1080p60@4.5M", "720p60@2.4M", "480p30@1M"], "keyframe_s": 1.0, "gpu": True},
-    {"name": "Audio-Only Radio", "video_codec": "—", "hw": "CPU", "audio_codec": "Opus",
+     "ladder": ["2160p50@18M", "1080p50@8M", "720p50@4M"], "keyframe_s": 2.0, "gpu": True},
+    {"name": "MPEG-2 Contribution", "video_codec": "MPEG-2", "hw": "CPU", "audio_codec": "MP2",
+     "ladder": ["1080p25@12M", "576p25@5M"], "keyframe_s": 1.0, "gpu": False},
+    {"name": "Audio-Only Radio", "video_codec": "—", "hw": "CPU", "audio_codec": "AAC",
      "ladder": ["audio@128k", "audio@64k"], "keyframe_s": 0.0, "gpu": False},
 ]
 
@@ -37,23 +37,23 @@ SAMPLE_SOURCES = [
 ]
 
 SAMPLE_STREAMS = [
-    {"name": "News Channel HD", "input": "Studio A — Main Camera", "profile": "1080p60 Broadcast",
-     "status": "live", "base_bitrate": 6.2, "base_viewers": 12400, "resolution": "1080p60",
-     "protocols_out": ["HLS", "DASH", "LL-HLS"], "dvr": True, "region": "EU-West"},
+    {"name": "News Channel HD", "input": "Studio A — Main Camera", "profile": "1080p50 Broadcast",
+     "status": "live", "base_bitrate": 6.2, "base_viewers": 12400, "resolution": "1080p", "fps": "50",
+     "protocols_out": ["HLS", "MPEG-DASH", "LL-HLS"], "dvr": True, "region": "EU-West"},
     {"name": "Sports 4K", "input": "Field Unit 1", "profile": "HEVC HDR 4K",
-     "status": "live", "base_bitrate": 17.8, "base_viewers": 30800, "resolution": "2160p60",
-     "protocols_out": ["HLS", "DASH"], "dvr": True, "region": "US-East"},
-    {"name": "Music Festival Live", "input": "Remote Guest (WebRTC)", "profile": "AV1 Low-Latency",
-     "status": "live", "base_bitrate": 4.4, "base_viewers": 8600, "resolution": "1080p60",
-     "protocols_out": ["LL-HLS", "WebRTC"], "dvr": False, "region": "EU-Central"},
+     "status": "live", "base_bitrate": 17.8, "base_viewers": 30800, "resolution": "2160p", "fps": "50",
+     "protocols_out": ["HLS", "MPEG-DASH"], "dvr": True, "region": "US-East"},
+    {"name": "Music Festival Live", "input": "Remote Guest (WebRTC)", "profile": "1080p50 Broadcast",
+     "status": "live", "base_bitrate": 4.4, "base_viewers": 8600, "resolution": "1080p", "fps": "25",
+     "protocols_out": ["LL-HLS"], "dvr": False, "region": "EU-Central"},
     {"name": "24/7 Radio Stream", "input": "NDI Graphics Bus", "profile": "Audio-Only Radio",
-     "status": "live", "base_bitrate": 0.13, "base_viewers": 2100, "resolution": "audio",
-     "protocols_out": ["HLS", "ICY"], "dvr": False, "region": "Global"},
-    {"name": "Backup Encoder", "input": "Backup Satellite Feed", "profile": "1080p60 Broadcast",
-     "status": "standby", "base_bitrate": 6.0, "base_viewers": 0, "resolution": "1080p60",
+     "status": "live", "base_bitrate": 0.13, "base_viewers": 2100, "resolution": "audio", "fps": "",
+     "protocols_out": ["HLS"], "dvr": False, "region": "Global"},
+    {"name": "Backup Encoder", "input": "Backup Satellite Feed", "profile": "1080p50 Broadcast",
+     "status": "standby", "base_bitrate": 6.0, "base_viewers": 0, "resolution": "1080p", "fps": "50",
      "protocols_out": ["HLS"], "dvr": True, "region": "US-West"},
-    {"name": "Conference Room B", "input": "Field Unit 1", "profile": "AV1 Low-Latency",
-     "status": "offline", "base_bitrate": 0.0, "base_viewers": 0, "resolution": "720p30",
+    {"name": "Conference Room B", "input": "Field Unit 1", "profile": "MPEG-2 Contribution",
+     "status": "offline", "base_bitrate": 0.0, "base_viewers": 0, "resolution": "720p", "fps": "25",
      "protocols_out": ["HLS"], "dvr": False, "region": "AP-South"},
 ]
 
