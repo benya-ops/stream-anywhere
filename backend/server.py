@@ -648,6 +648,8 @@ class ChannelBody(BaseModel):
     source: str = "test"          # test | bars | url | srt-listen | rtmp-listen
     source_url: str = ""          # used when source is a pull URL
     ingest_port: int = 9000       # used by srt-listen / rtmp-listen
+    source_id: str = ""           # optional reference to a saved Input Source
+    profile_id: str = ""          # optional reference to a saved Transcoding profile
     ladder: str = "720p"          # 1080p | 720p | 480p | single
     fps: str = "50"               # output frame rate (transcode/convert to this)
     keyframe_s: float = 2.0       # keyframe (GOP) interval in seconds
@@ -657,6 +659,50 @@ class ChannelBody(BaseModel):
     push_url: str = ""            # optional RTMP/SRT push egress
     dvr: bool = False             # keep full seekable window for DVR
     region: str = "EU-West"
+
+
+def _norm_hw(hw: str) -> str:
+    h = (hw or "").upper()
+    for k in ("NVENC", "QSV", "VAAPI", "CPU"):
+        if k in h:
+            return k
+    return "auto"
+
+
+def _source_to_ingest(src: dict):
+    """Map a saved Input Source doc -> engine (source, source_url, ingest_port)."""
+    proto = (src.get("protocol") or "").upper()
+    mode = (src.get("mode") or "").lower()
+    url = src.get("url") or ""
+    port = int(src.get("port") or 9000)
+    if mode == "listener" and proto == "SRT":
+        return "srt-listen", "", port
+    if mode == "listener" and proto == "RTMP":
+        return "rtmp-listen", "", port
+    # everything else (pull/caller/push/whip + any URL) is pulled from the URL
+    return "url", url, port
+
+
+_LADDER_RE = __import__("re").compile(r"(\d+)\s*p\s*([\d.]+)?\s*@\s*([\d.]+)\s*([MmKk])")
+
+
+def _parse_profile_ladder(ladder):
+    """Parse profile ladder strings like '1080p50@6M' -> (rungs [[h,vkbps,akbps]], fps)."""
+    rungs, fps = [], ""
+    for item in (ladder or []):
+        m = _LADDER_RE.search(str(item))
+        if not m:
+            continue
+        h = int(m.group(1))
+        if m.group(2) and not fps:
+            fps = m.group(2)
+        val = float(m.group(3))
+        vk = int(val * 1000) if m.group(4).lower() == "m" else int(val)
+        ak = 128 if h >= 720 else 96
+        rungs.append([h, vk, ak])
+    return rungs, fps
+
+
 
 
 class ProbeBody(BaseModel):
@@ -744,10 +790,39 @@ async def start_channel(channel_id: str, user: dict = Depends(require_module("en
         fps = str(doc.get("fps") or pdef.get("fps", "50"))
         keyframe_s = float(doc.get("keyframe_s") or pdef.get("keyframe_s", 2.0))
         segment_s = int(pdef.get("hls_segment_s", 4))
-        engine.start_channel(channel_id, doc.get("source", "test"), doc.get("source_url", ""),
-                             int(doc.get("ingest_port", 9000)), ladder_key,
-                             doc.get("video_codec", "H.264"), doc.get("audio_codec", "AAC"),
-                             doc.get("hw", "auto"), doc.get("push_url", ""), bool(doc.get("dvr", False)),
+        video_codec = doc.get("video_codec", "H.264")
+        audio_codec = doc.get("audio_codec", "AAC")
+        hw = doc.get("hw", "auto")
+        src = doc.get("source", "test")
+        src_url = doc.get("source_url", "")
+        ingest_port = int(doc.get("ingest_port", 9000))
+
+        # 1) resolve ingest from a saved Input Source, if referenced
+        if doc.get("source_id"):
+            sdoc = await db.sources.find_one({"id": doc["source_id"]})
+            if not sdoc:
+                raise HTTPException(400, "Selected input source no longer exists")
+            src, src_url, ingest_port = _source_to_ingest(sdoc)
+
+        # 2) apply a saved Transcoding profile, if referenced (overrides codecs/ladder/fps/keyframe)
+        if doc.get("profile_id"):
+            pdoc = await db.profiles.find_one({"id": doc["profile_id"]})
+            if not pdoc:
+                raise HTTPException(400, "Selected transcoding profile no longer exists")
+            video_codec = pdoc.get("video_codec", video_codec)
+            audio_codec = pdoc.get("audio_codec", audio_codec)
+            hw = _norm_hw(pdoc.get("hw", hw))
+            if pdoc.get("keyframe_s"):
+                keyframe_s = float(pdoc["keyframe_s"])
+            prungs, pfps = _parse_profile_ladder(pdoc.get("ladder"))
+            if prungs:
+                rungs = prungs
+            if pfps:
+                fps = pfps
+
+        engine.start_channel(channel_id, src, src_url, ingest_port, ladder_key,
+                             video_codec, audio_codec, hw, doc.get("push_url", ""),
+                             bool(doc.get("dvr", False)),
                              fps=fps, keyframe_s=keyframe_s, segment_s=segment_s, rungs=rungs)
     except HTTPException:
         raise

@@ -61,6 +61,14 @@ functionality + work with all codecs. Product name: **Stream Anywhere**.
 - Note: `/api/analytics` and the legacy `db.streams` endpoints remain (simulated) but are no longer used by Overview/Streams UI.
 - Tested: iter9 100% backend (test_prod_streams.py 7/7) + 100% frontend (no fake cdn string anywhere, origin/CDN URLs correct, purge clears all).
 
+## Pipeline wiring (2026-06) — Source → Live Stream → Transcoding
+- Input Sources & Transcoding profiles are now CONNECTED to the real engine (previously standalone catalogs).
+- ChannelBody gained `source_id` and `profile_id`. On start_channel:
+  - `source_id` → `_source_to_ingest()` maps a saved Source to engine ingest (SRT/RTMP listener by port, or URL pull).
+  - `profile_id` → `_parse_profile_ladder()` + `_norm_hw()` apply the profile's codecs/hw/keyframe, ladder rungs and fps to FFmpeg (overrides manual fields).
+- Live Stream create/edit modal: pick an **Input Source** (or built-in test/bars/URL) and an optional **Transcoding Profile** (hides manual codec/ladder/fps when chosen).
+- Verified end-to-end via curl: source_id (HLS pull) → live + master.m3u8 200; profile_id → 2 renditions + fps=25 applied.
+
 ## Backlog / next
 - P1: LL-HLS + simultaneous MPEG-DASH packaging.
 - P1: Multi-node clustering / load balancing.

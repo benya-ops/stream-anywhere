@@ -8,13 +8,15 @@ import { toast } from "sonner";
 import { Play, Square, Trash2, Plus, Eye, Pencil, Radio, Globe, Save, Loader2, Copy } from "lucide-react";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const emptyForm = { name: "", source: "test", source_url: "", ingest_port: 9000, ladder: "720p", fps: "50", keyframe_s: 2, video_codec: "H.264", audio_codec: "AAC", hw: "auto", push_url: "", dvr: false, region: "EU-West" };
+const emptyForm = { name: "", source: "test", source_url: "", ingest_port: 9000, source_id: "", profile_id: "", ladder: "720p", fps: "50", keyframe_s: 2, video_codec: "H.264", audio_codec: "AAC", hw: "auto", push_url: "", dvr: false, region: "EU-West" };
 
 export default function Streams() {
   const { user } = useAuth();
   const [channels, setChannels] = useState(null);
   const [status, setStatus] = useState(null);
   const [presets, setPresets] = useState(null);
+  const [sources, setSources] = useState([]);
+  const [profiles, setProfiles] = useState([]);
   const [delivery, setDelivery] = useState({ cdn_base: "" });
   const [editing, setEditing] = useState(null); // null | "new" | id
   const [preview, setPreview] = useState(null);
@@ -23,11 +25,13 @@ export default function Streams() {
   const [cdnInput, setCdnInput] = useState("");
 
   const load = async () => {
-    const [c, s, cfg, del] = await Promise.all([
-      api.get("/channels"), api.get("/engine/status"), api.get("/config/presets"), api.get("/config/delivery"),
+    const [c, s, cfg, del, src, prof] = await Promise.all([
+      api.get("/channels"), api.get("/engine/status"), api.get("/config/presets"),
+      api.get("/config/delivery"), api.get("/sources"), api.get("/profiles"),
     ]);
     setChannels(c.data); setStatus(s.data); setPresets(cfg.data);
     setDelivery(del.data); setCdnInput(del.data.cdn_base || "");
+    setSources(src.data); setProfiles(prof.data);
     setPreview((prev) => prev ? c.data.find((x) => x.id === prev.id) || prev : prev);
   };
 
@@ -58,6 +62,7 @@ export default function Streams() {
   const openEdit = (ch) => {
     setForm({
       name: ch.name, source: ch.source || "test", source_url: ch.source_url || "", ingest_port: ch.ingest_port || 9000,
+      source_id: ch.source_id || "", profile_id: ch.profile_id || "",
       ladder: ch.ladder || "720p", fps: String(ch.fps || "50"), keyframe_s: ch.keyframe_s ?? 2,
       video_codec: ch.video_codec || "H.264", audio_codec: ch.audio_codec || "AAC", hw: ch.hw || "auto",
       push_url: ch.push_url || "", dvr: !!ch.dvr, region: ch.region || "EU-West",
@@ -169,26 +174,51 @@ export default function Streams() {
         footer={<><GhostButton testid="cancel-create" onClick={() => setEditing(null)}>Cancel</GhostButton><PrimaryButton testid="save-stream" onClick={save}>{editing === "new" ? "Create Stream" : "Save Changes"}</PrimaryButton></>}>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2"><TextField label="Channel Name" testid="field-name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} placeholder="News Channel HD" /></div>
-          <SelectField label="Ingest Source" testid="field-source" value={form.source} onChange={(v) => setForm({ ...form, source: v })}
-            options={[
-              { value: "test", label: "Generated Test Pattern" },
-              { value: "bars", label: "SMPTE Color Bars" },
-              { value: "url", label: "Pull from URL (HLS/RTSP/MP4/RTMP)" },
-              { value: "srt-listen", label: "SRT Listener (push-in)" },
-              { value: "rtmp-listen", label: "RTMP Listener (push-in)" },
-            ]} />
-          <SelectField label="ABR Ladder" testid="field-ladder" value={form.ladder} onChange={(v) => setForm({ ...form, ladder: v })} options={status.ladders} />
-          {form.source === "url" && (
-            <div className="sm:col-span-2"><TextField label="Pull URL" testid="field-url" value={form.source_url} onChange={(v) => setForm({ ...form, source_url: v })} placeholder="https://…/index.m3u8 · rtsp://… · srt://…" /></div>
+
+          <SelectField label="Input Source" testid="field-source-id" value={form.source_id}
+            onChange={(v) => setForm({ ...form, source_id: v })}
+            options={[{ value: "", label: "Built-in (test / bars / URL)" }, ...sources.map((s) => ({ value: s.id, label: `${s.name} (${s.protocol})` }))]} />
+
+          <SelectField label="Transcoding Profile" testid="field-profile-id" value={form.profile_id}
+            onChange={(v) => setForm({ ...form, profile_id: v })}
+            options={[{ value: "", label: "Manual settings (below)" }, ...profiles.map((p) => ({ value: p.id, label: p.name }))]} />
+
+          {/* Built-in ingest fields — only when no saved Source is selected */}
+          {!form.source_id && (
+            <>
+              <SelectField label="Built-in Source" testid="field-source" value={form.source} onChange={(v) => setForm({ ...form, source: v })}
+                options={[
+                  { value: "test", label: "Generated Test Pattern" },
+                  { value: "bars", label: "SMPTE Color Bars" },
+                  { value: "url", label: "Pull from URL (HLS/RTSP/MP4/RTMP)" },
+                  { value: "srt-listen", label: "SRT Listener (push-in)" },
+                  { value: "rtmp-listen", label: "RTMP Listener (push-in)" },
+                ]} />
+              {form.source === "url" && (
+                <div className="sm:col-span-2"><TextField label="Pull URL" testid="field-url" value={form.source_url} onChange={(v) => setForm({ ...form, source_url: v })} placeholder="https://…/index.m3u8 · rtsp://… · srt://…" /></div>
+              )}
+              {(form.source === "srt-listen" || form.source === "rtmp-listen") && (
+                <TextField label="Ingest Port" testid="field-port" type="number" value={form.ingest_port} onChange={(v) => setForm({ ...form, ingest_port: v })} />
+              )}
+            </>
           )}
-          {(form.source === "srt-listen" || form.source === "rtmp-listen") && (
-            <TextField label="Ingest Port" testid="field-port" type="number" value={form.ingest_port} onChange={(v) => setForm({ ...form, ingest_port: v })} />
+
+          {/* Manual transcode fields — only when no saved Profile is selected */}
+          {!form.profile_id ? (
+            <>
+              <SelectField label="ABR Ladder" testid="field-ladder" value={form.ladder} onChange={(v) => setForm({ ...form, ladder: v })} options={status.ladders} />
+              <SelectField label="Frame Rate (fps)" testid="field-fps" value={form.fps} onChange={(v) => setForm({ ...form, fps: v })} options={status.frame_rates || ["50", "25", "60", "30"]} />
+              <TextField label="Keyframe (s)" testid="field-keyframe" type="number" value={form.keyframe_s} onChange={(v) => setForm({ ...form, keyframe_s: v })} />
+              <SelectField label="Video Codec" testid="field-video" value={form.video_codec} onChange={(v) => setForm({ ...form, video_codec: v })} options={status.video_codecs} />
+              <SelectField label="Audio Codec" testid="field-audio" value={form.audio_codec} onChange={(v) => setForm({ ...form, audio_codec: v })} options={status.audio_codecs} />
+              <SelectField label="Hardware" testid="field-hw" value={form.hw} onChange={(v) => setForm({ ...form, hw: v })} options={["auto", ...(status.hardware_accels || ["CPU"])]} />
+            </>
+          ) : (
+            <div className="sm:col-span-2 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3 font-mono text-[11px] text-sky-300">
+              Codecs, ABR ladder, frame rate & keyframe come from the selected transcoding profile.
+            </div>
           )}
-          <SelectField label="Frame Rate (fps)" testid="field-fps" value={form.fps} onChange={(v) => setForm({ ...form, fps: v })} options={status.frame_rates || ["50", "25", "60", "30"]} />
-          <TextField label="Keyframe (s)" testid="field-keyframe" type="number" value={form.keyframe_s} onChange={(v) => setForm({ ...form, keyframe_s: v })} />
-          <SelectField label="Video Codec" testid="field-video" value={form.video_codec} onChange={(v) => setForm({ ...form, video_codec: v })} options={status.video_codecs} />
-          <SelectField label="Audio Codec" testid="field-audio" value={form.audio_codec} onChange={(v) => setForm({ ...form, audio_codec: v })} options={status.audio_codecs} />
-          <SelectField label="Hardware" testid="field-hw" value={form.hw} onChange={(v) => setForm({ ...form, hw: v })} options={["auto", ...(status.hardware_accels || ["CPU"])]} />
+
           <SelectField label="Region" testid="field-region" value={form.region} onChange={(v) => setForm({ ...form, region: v })} options={presets?.regions || ["EU-West"]} />
           <TextField label="Push Egress (optional)" testid="field-push" value={form.push_url} onChange={(v) => setForm({ ...form, push_url: v })} placeholder="rtmp://cdn/live/key · srt://…" />
           <label className="sm:col-span-2 flex items-center gap-2.5 rounded-lg border border-[#1E293B] bg-slate-950/40 px-3 py-2.5 cursor-pointer">
