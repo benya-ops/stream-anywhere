@@ -11,6 +11,23 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Self-heal stale/invalid tokens: on 401 for a non-auth call, drop the token and
+// bounce to the login screen instead of silently spamming 401s.
+api.interceptors.response.use(
+  (r) => r,
+  (err) => {
+    const url = err.config?.url || "";
+    const isAuthCall = url.includes("/auth/login") || url.includes("/auth/me");
+    if (err.response?.status === 401 && !isAuthCall && localStorage.getItem("sa_token")) {
+      localStorage.removeItem("sa_token");
+      if (!window.location.pathname.startsWith("/login")) {
+        window.location.href = "/login";
+      }
+    }
+    return Promise.reject(err);
+  }
+);
+
 export function formatApiError(detail) {
   if (detail == null) return "Something went wrong. Please try again.";
   if (typeof detail === "string") return detail;
